@@ -1,3 +1,5 @@
+BiocManager::install("flowCore")
+library("flowCore")
 fcs_files = list.files('./02_data', pattern='\\.fcs$', full.names = TRUE)
 flow_set = read.flowSet(fcs_files)
 
