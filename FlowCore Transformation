@@ -1,0 +1,7 @@
+fcs_files = list.files('./02_data', pattern='\\.fcs$', full.names = TRUE)
+flow_set = read.flowSet(fcs_files)
+
+marker_names = colnames(flow_set)
+transformation <- arcsinhTransform()
+transform_list <- transformList(from = marker_names, tfun = transformation)
+transformed_flowset <- transform_list %on% flow_set
