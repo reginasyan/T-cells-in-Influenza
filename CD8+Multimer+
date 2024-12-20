@@ -1,0 +1,289 @@
+#installing packages
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install("flowCore")
+BiocManager::install("flowViz")
+BiocManager::install("flowVS")
+BiocManager::install("flowAI")
+BiocManager::install("flowAI")
+BiocManager::install("PeacoQC")
+BiocManager::install("CATALYST")
+BiocManager::install("SingleCellExperiment")
+
+if(!requireNamespace("devtools", quietly=TRUE))
+  install.packages("devtools")
+
+devtools::install_github('saeyslab/CytoNorm')
+install.packages("uwot")
+install.packages("knitr")
+install.packages("xlsx")
+install.packages("uwot")
+BiocManager::install("flowCore")
+
+
+# set seed and install libraries
+set.seed(123)
+library(flowCore)
+library(flowViz)
+library(flowVS)
+library(flowAI)
+library(PeacoQC)
+library(CATALYST)
+library(CytoNorm)
+library(SingleCellExperiment)
+library(uwot)
+library(knitr)
+library(xlsx)
+library("flowCore")
+library("flowCut")
+
+
+#directories
+
+setwd("~/Regina/IVA")
+
+fcs.dir<- file.path(getwd(), "02_data/patient_2_3/Multimer") 
+fcs_data <- read.flowSet(path=fcs.dir, pattern="*.fcs", transformation = FALSE, truncate_max_range = FALSE)
+
+# data frame of the panel
+
+fcs_colname <- colnames(fcs_data)
+marker_class <- rep("none", ncol(fcs_data[[1]]))
+marker_type <- c(8:28,31:43)
+marker_class[marker_type] <- "type" # markers that indicate surface markers, such as CD3, CD4, or markers that you do want to use for clustering
+marker_class <- factor(marker_class, levels=c("type", "none"))
+antigen <- pData(parameters(fcs_data[[1]]))$desc
+
+panel <- data.frame(fcs_colname, antigen, marker_class, row.names = NULL)
+write.xlsx(panel, file="C:/Users/Admin/Documents/Regina/IVA/04_exports/panel.xlsx", sheetName="Panel")
+
+#downsample the data
+markerstotransform <- panel$fcs_colname[c(8:28,31:43)] 
+
+Downsampling_FlowSet <- function(x, samplesize , replace=TRUE, prob=NULL){
+  if(missing(samplesize))
+    samplesize <- min(flowCore::fsApply(x,nrow))
+  flowCore::fsApply(x, function(ff){
+    i <- sample(nrow(ff), size = samplesize, replace=replace, prob)
+    ff[i,]
+  })
+}
+
+fcs_data_small <- Downsampling_FlowSet(x=fcs_data, samplesize = 2000)
+
+#inspect the data to decide which type of transformation suits better
+expression_data <- fcs_data[[1]]
+expression_data <- expression_data@exprs
+
+
+
+#tranform the data with FlowVS
+cofactors <- estParamFlowVS(fcs_data_small, channels=markerstotransform)
+cofactordata <- data.frame(markerstotransform, cofactors)
+write.csv(x=cofactordata, file="C:/Users/Admin/Documents/Regina/IVA/04_exports/cofactordata.csv") #csv file
+write.xlsx(x=cofactordata, file="C:/Users/Admin/Documents/Regina/IVA/04_exports/cofactordata.xlsx", sheet="cofactordata_A")
+
+fcs_transform <- transFlowVS(fcs_data, channels = markerstotransform, cofactors)
+filenames <- sampleNames(fcs_data)
+sampleNames(fcs_transform) <- filenames
+
+
+# Open the PDF device
+pdf("C:/Users/Admin/Documents/Regina/IVA/03_figures/Density_plot_transformation_FlowFS_cofactors.pdf")
+
+# Create the density plot
+densityplot(~., fcs_data[[1]])
+densityplot(~., fcs_transform[[1]])
+
+# Close the PDF device to save the file
+dev.off()
+
+# Loop for the QC by flowCut
+for (i in length(fcs_transform@frames)) {
+  file_name <- basename(fcs_transform[[i]]@description$FILENAME)
+  # Apply the flowCut function for each sample
+  res_flowCut <- flowCut(fcs_transform[[i]], FileID = file_name, Plot = "All", Segment = 1000)
+  
+  # Optionally, print the result or save it
+  print(paste("Results for sample", i))
+  print(res_flowCut$data)
+  
+}
+
+
+
+
+# Automatic QC
+# not pre-gated timegate
+fcs_transform <- flow_auto_qc(fcs_transform) 
+
+#pre-gated time gate
+#fcs_transform <- flow_auto_qc(fcs_transform, remove_from = "FS_FM")  
+
+outdir <- file.path("C:/Users/Admin/Documents/Regina/training_data/02_data", "Transformed FCS files") 
+filenames <- paste("tf",fcs_data@phenoData@data$name)
+write.flowSet(fcs_transform, outdir = outdir, filename = filenames) #create a new directory with transformed FCS files
+
+#creating the metadata
+files <- list.files("./02_data/patient_2_3/Multimer", 
+                    pattern = "fcs",
+                    full.names = TRUE)
+file_name <- fsApply(fcs_data, identifier)
+md <- data.frame(file_name = file_name)
+md$sample_id <- gsub("\\.fcs", "", basename(md$file_name))
+md$patient <- sapply(strsplit(md$sample_id, " - "), function(x) x[1])
+md$experiment <- sapply(strsplit(md$sample_id, " - "), function(x) x[2])
+md$cells <- sapply(strsplit(md$sample_id, " - "), function(x) x[3])
+md$experiment_cells <- paste(md$experiment, md$cells, sep = "_")
+rownames(md)  <- NULL
+kable(md)
+
+#subsampling
+
+Downsampling_FlowSet <- function(x, samplesize , replace=TRUE, prob=NULL){
+  if(missing(samplesize))
+    samplesize <- min(flowCore::fsApply(x,nrow))
+  flowCore::fsApply(x, function(ff){
+    i <- sample(nrow(ff), size = samplesize, replace=replace, prob)
+    ff[i,]
+  })
+}
+
+fcs_transform <- fcs_transform[c(2,4,6,8,10,12)] #only ag specific cells
+md <- md[c(2,4,6,8,10,12),] # only ag specific cells
+
+Subsampling_FlowSet <- function(x, fraction, md){
+  b <- round(fraction*length(x), digits=0)
+  
+  listq <- sample(x=length(x), b, replace=FALSE)
+  listq <- sort(listq)
+  
+  fcs_train<-x[c(listq)]
+  
+  md_train <- md[c(listq),]
+  
+  
+  fcs_train <<- fcs_train
+  md_train <<- md_train
+  
+  listy <- 1:length(x)
+  
+  listz <- subset(listy, !(listy %in% listq))
+  
+  listz <- sort(listz)
+  
+  fcs_test <- x[c(listz)]
+  
+  md_test <- md[c(listz),]
+  
+  fcs_test <<- fcs_test
+  md_test <<- md_test
+  
+}
+
+#Subsampling_FlowSet(fcs_transform,0.25, md=md) #test and train set are created
+
+
+#UMAP
+
+#fcs_train <- Downsampling_FlowSet(fcs_train, samplesize =20000) # you can still downsample your training set if needed, but you can also include all or more cells
+sce <- prepData(fcs_transform, md=md, panel= panel, FACS = TRUE, transform=FALSE, md_cols =list(file="file_name", id="patient", factors=c("cells", "experiment", "experiment_cells")))
+assayNames(sce)[1] <- "exprs"
+
+exprs <- assay(sce, "exprs")
+exprs <- t(exprs)
+exprs <- exprs[,c(marker_type)] #markers you want to use for clustering, you can also use marker_state or marker_type
+
+set.seed(1234)
+
+umap <- umap(exprs, n_neighbors=5)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+umap <- umap(exprs, n_neighbors=15)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+umap <- umap(exprs, n_neighbors=50)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+umap <- umap(exprs, n_neighbors=100)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+#if you chose the right n_neighbors, you can also test min_dist
+umap <- umap(exprs, n_neighbors=50, min_dist = 0.01)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+umap <- umap(exprs, n_neighbors=50, min_dist = 0.1)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+umap <- umap(exprs, n_neighbors=50, min_dist = 0.5)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+# choose the optimal parameters, to assess robustness of the umap you can vary the seed
+
+set.seed(1234)
+umap <- umap(exprs, n_neighbors=50, min_dist = 0.5)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+set.seed(7460)
+umap <- umap(exprs, n_neighbors=50, min_dist = 0.5)
+reducedDim(sce, "UMAP")<- umap
+plotDR(sce, "UMAP", color_by="sample_id")
+
+set.seed(7460)
+umap <- umap(exprs, n_neighbors=50, min_dist = 0.5, ret_model = TRUE)
+reducedDim(sce, "UMAP")<- umap$embedding
+plotDR(sce, "UMAP", color_by="sample_id")
+plotDR(sce, "UMAP", color_by="experiment")
+plotDR(sce, "UMAP", color_by="CD26")
+plotDR(sce, "UMAP", color_by="CD73")
+plotDR(sce, "UMAP", color_by="CCR7")	
+
+#Clustering data
+
+set.seed(7460)
+
+sce<- prepData(fcs_transform, md=md, panel= panel, FACS = TRUE, transform=FALSE, md_cols =list(file="file_name", id="patient", factors=c("cells", "experiment", "experiment_cells")))
+
+assayNames(sce)[1] <- "exprs"
+sce <- cluster(sce, features="type", maxK=16, seed=7460)
+
+sce <- runDR(sce, "UMAP",  features = "type", n_neighbors=50, min_dist = 0.5)
+plotDR(sce, "UMAP", color_by="meta16")
+plotDR(sce, "UMAP", color_by="experiment")
+plotDR(sce, "UMAP", color_by="sample_id")
+plotDR(sce, "UMAP", color_by="CD26")
+plotDR(sce, "UMAP", color_by="CD73")
+plotDR(sce, "UMAP", color_by="CCR7")
+plotDR(sce, "UMAP", color_by="TIGIT")
+plotDR(sce, "UMAP", color_by="CD39")
+plotDR(sce, "UMAP", color_by="Granzyme B")
+plotDR(sce, "UMAP", color_by="CD40L")
+plotDR(sce, "UMAP", color_by="meta16")
+
+#Plot the number of cells per sample
+Cell_numbers <-plotCounts(sce, prop=FALSE, group_by = "sample_id")#change prop to TRUE to see frequencies
+print(Cell_numbers)
+Cell_numbers_data <- Cell_numbers[["data"]] #dataframe of number of cells per sample, could be useful if you want to export dataframe and use it to make graphs in other programs, such as Graphpad Prism
+
+
+#Heatmap of the median expression per marker per metacluster or sample, more information can be found in https://bioconductor.org/packages/release/bioc/html/CATALYST.html 
+
+plotExprHeatmap(sce, features = "type", by="cluster_id", k="meta16", scale = "never", q = 0, perc=TRUE, bars = FALSE)
+
+plotExprHeatmap(sce, features = "type", by="sample_id", k="meta16", scale = "last", q = 0, perc=TRUE, bars = FALSE, row_anno = TRUE, ) #this plot can also be used to check for batch effects 
+
+Cell_freq_clusters <- plotAbundances(sce, k = "meta16", group_by = "experiment")
+print(Cell_freq_clusters)
+Cell_freq_clusters_data <- Cell_freq_clusters[["data"]]
+write.xlsx(x=Cell_freq_clusters_data, file="C:/Users/Admin/Documents/Regina/IVA/04_exports.xlsx")
+
