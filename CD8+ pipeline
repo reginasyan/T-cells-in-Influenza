@@ -209,9 +209,23 @@ set.seed(5024)
 sce_total<- prepData(fcs_transform, md=md, panel= panel, FACS = TRUE, transform=FALSE, md_cols =list(file="file_name", id="patient", factors=c("cells", "experiment", "experiment_cells")))
 
 assayNames(sce_total)[1] <- "exprs"
-sce_total <- cluster(sce_total, features="type", maxK=20, seed=5024)
+sce_total <- cluster(sce_total, features="type", maxK=9, seed=5024)
 
 sce_total <- runDR(sce_total, "UMAP", cells = 6000, n_neighbors=100 , min_dist = 0.5, features = "type")
+plotDR(sce_total, "UMAP", color_by="meta9")
+plotDR(sce_total, "UMAP", color_by="Multimer", scale = FALSE)
+plotDR(sce_total, "UMAP", color_by="CD8")
+
+#Heatmap of the median expression per marker per metacluster or sample, more information can be found in https://bioconductor.org/packages/release/bioc/html/CATALYST.html 
+
+plotExprHeatmap(sce, features = "type", by="cluster_id", k="meta20", scale = "never", q = 0, perc=TRUE, bars = FALSE)
+
+plotExprHeatmap(sce, features = "type", by="sample_id", k="meta20", scale = "last", q = 0, perc=TRUE, bars = FALSE, row_anno = TRUE, ) #this plot can also be used to check for batch effects 
+
+Cell_freq_clusters <- plotAbundances(sce, k = "meta20", group_by = "experiment")
+print(Cell_freq_clusters)
+Cell_freq_clusters_data <- Cell_freq_clusters[["data"]]
+
 plotDR(sce_total, "UMAP", color_by="meta20")
 plotDR(sce_total, "UMAP", color_by="Multimer", scale = FALSE)
 plotDR(sce_total, "UMAP", color_by="CD8")
