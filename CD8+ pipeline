@@ -1,6 +1,3 @@
-BiocManager::install("ggcyto")
-
-
 # set seed and install libraries
 set.seed(123)
 library(flowCore)
@@ -153,8 +150,7 @@ exprs_train <- exprs_train[,c(marker_type)] #markers you want to use for cluster
 
 set.seed(1234)
 
-
-umap_train <- uwot::umap(exprs_train, n_neighbors=100, , min_dist = 0.5, ret_model = TRUE)
+umap_train <- uwot::umap(exprs_train, n_neighbors=100, min_dist = 0.5, ret_model = TRUE)
 reducedDim(sce_train, "UMAP")<- umap_train$embedding
 plotDR(sce_train, "UMAP", color_by="experiment")
 
@@ -179,19 +175,18 @@ sce_total <- cbind(sce_train, sce_test)
 reducedDim(sce_total, "UMAP") <- umap_total
 
 plotDR(sce_total, "UMAP", color_by = "experiment")
-plotDR(sce_total, "UMAP", color_by = "CD4")
+plotDR(sce_total, "UMAP", color_by = "sample_id")
 plotDR(sce_total, "UMAP", color_by = "Multimer")
 
 #create the gating strategy for Multimer+ cells
-autoplot(fcs_transform, "cFluor B548-A", "PE-A")
-
+autoplot(fcs_transform, "PE-A", "SSC-A")
 autoplot(fcs_transform,  "PE-A")
 
-rectGate <- rectangleGate(filterId="Multimer+", "PE-A"=c(1.5, 12))
+rectGate <- rectangleGate(filterId = "Multimer+", "PE-A"=c(1.5, 12))
 result = filter(fcs_transform[[2]], rectGate)
 summary(result)
 
-filter(fcs_transform,rectGate)
+filter(fcs_transform, rectGate)
 
 #create the gating set
 gs <- GatingSet(fcs_transform)
@@ -202,30 +197,47 @@ autoplot(gs, "Multimer+")
 
 ggcyto(gs, aes(x = `PE-A`)) + geom_density() + geom_gate("Multimer+")
 
-#Clustering data
+stats <- gs_pop_get_stats(gs, "Multimer+")
+head(stats)
 
-set.seed(5024)
+
+
+#Clustering data
 
 sce_total<- prepData(fcs_transform, md=md, panel= panel, FACS = TRUE, transform=FALSE, md_cols =list(file="file_name", id="patient", factors=c("cells", "experiment", "experiment_cells")))
 
 assayNames(sce_total)[1] <- "exprs"
-sce_total <- cluster(sce_total, features="type", maxK=9, seed=5024)
+sce_total <- cluster(sce_total, features="type", maxK=20, seed=1234)
 
-sce_total <- runDR(sce_total, "UMAP", cells = 6000, n_neighbors=100 , min_dist = 0.5, features = "type")
-plotDR(sce_total, "UMAP", color_by="meta9")
-plotDR(sce_total, "UMAP", color_by="Multimer", scale = FALSE)
-plotDR(sce_total, "UMAP", color_by="CD8")
+sce_total <- runDR(sce_total, "UMAP", cells=50000, n_neighbors=100 , min_dist = 0.5, features = "type")
+plotDR(sce_total, "UMAP", color_by="meta20")
+
+
+#Mapping of multimer+ cells on UMAP
+exprs_data <- sce_total@assays@data$exprs
+colData(sce_total)$Gating <- ifelse( exprs_data[31,] >= 1.5,"Multimer+","Non-multimer")
+
+plotDR(sce_total, "UMAP", color_by = "Gating")
+
+#All the UMAPs
+set.seed(1234)
+plotDR(sce_total, "UMAP", color_by="meta20")
+plotDR(sce_total, "UMAP", color_by = "experiment")
+plotDR(sce_total, "UMAP", color_by = "sample_id")
+plotDR(sce_total, "UMAP", color_by = "Gating")
+
+
+plotDR(sce_total, "UMAP", color_by="meta20", facet_by = "experiment")
+plotDR(sce_total, "UMAP", color_by="meta20", facet_by = "sample_id")
 
 #Heatmap of the median expression per marker per metacluster or sample, more information can be found in https://bioconductor.org/packages/release/bioc/html/CATALYST.html 
+set.seed(1234)
+plotExprHeatmap(sce_total, features = "type", by="cluster_id", k="meta20", scale = "never", q = 0, perc=TRUE, bars = FALSE)
+plotExprHeatmap(sce_total, features = "type", by="cluster_id", k="meta20", scale = "last", q = 0, perc=TRUE, bars = FALSE)
 
-plotExprHeatmap(sce, features = "type", by="cluster_id", k="meta20", scale = "never", q = 0, perc=TRUE, bars = FALSE)
+plotExprHeatmap(sce_total, features = "type", by="sample_id", k="meta20", scale = "last", q = 0, perc=TRUE, bars = FALSE, row_anno = TRUE, ) #this plot can also be used to check for batch effects 
 
-plotExprHeatmap(sce, features = "type", by="sample_id", k="meta20", scale = "last", q = 0, perc=TRUE, bars = FALSE, row_anno = TRUE, ) #this plot can also be used to check for batch effects 
 
-Cell_freq_clusters <- plotAbundances(sce, k = "meta20", group_by = "experiment")
+Cell_freq_clusters <- plotAbundances(sce_total, k = "meta20", group_by = "experiment")
 print(Cell_freq_clusters)
 Cell_freq_clusters_data <- Cell_freq_clusters[["data"]]
-
-plotDR(sce_total, "UMAP", color_by="meta20")
-plotDR(sce_total, "UMAP", color_by="Multimer", scale = FALSE)
-plotDR(sce_total, "UMAP", color_by="CD8")
