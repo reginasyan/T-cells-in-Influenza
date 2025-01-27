@@ -1,0 +1,30 @@
+#create the gating strategy for Multimer+ cells
+autoplot(fcs_transform, "PE-A", "SSC-A")
+autoplot(fcs_transform,  "PE-A")
+
+rectGate <- rectangleGate(filterId = "Multimer+", "PE-A"=c(1.6, 12))
+result = filter(fcs_transform[[2]], rectGate)
+summary(result)
+
+filter(fcs_transform, rectGate)
+
+#create the gating set
+gs <- GatingSet(fcs_transform)
+gs_pop_add(gs, rectGate, parent = "root")
+recompute(gs)
+
+autoplot(gs, "Multimer+")
+
+ggcyto(gs, aes(x = `PE-A`)) + geom_density() + geom_gate("Multimer+")
+
+stats <- gs_pop_get_stats(gs, "Multimer+")
+head(stats)
+
+#Mapping of multimer+ cells on UMAP
+exprs_data <- sce_total@assays@data$exprs
+colData(sce_total)$Gating <- ifelse( exprs_data[31,] >= 1.5,"Multimer+","Non-multimer")
+
+plotDR(sce_total, "UMAP", color_by = "Gating")
+
+#Subset Multimer+ cells in a separate object
+sce_multimer <- sce_total[,sce_total@colData$Gating =="Multimer+"]
