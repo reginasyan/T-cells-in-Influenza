@@ -124,7 +124,12 @@ for (i in seq_along(fcs_transform)) {
   print(sample_id)
 }
 
-fcs_multimer <- flowSet(filtered_flowFrame)
+# Assign file names (from md) to the filtered_flowFrames list
+#check if they are consistent
+print(filtered_flowFrames[[i]]@description[["GUID"]])
+print(md[["file_name"]])
+#assign
+names(filtered_flowFrames) <- md[["file_name"]]
 
 sce_multimer<- prepData(filtered_flowFrames, md=md, panel= panel, FACS = TRUE, transform=FALSE, md_cols =list(file="file_name", id="patient", factors=c("cells", "experiment", "experiment_cells")))
 
