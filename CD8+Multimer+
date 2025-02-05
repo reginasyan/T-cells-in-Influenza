@@ -15,6 +15,7 @@ library("flowCore")
 library("flowCut")
 library(ggcyto)
 library(clustree)
+library(cytoMEM)
 
 #directories
 
@@ -94,10 +95,10 @@ for (i in seq_along(fcs_transform)) {
   
   # Apply threshold for sample "24-060"
   if (grepl("24-060", sample_id)) {
-    gating[exprs_data[, "PE-A"] >= 1.5] <- "Multimer+"  # Apply threshold
+    gating[exprs_data[, "PE-A"] >= 1.5 & exprs_data[, "cFluor B548-A"] > 0.75] <- "Multimer+"  # Apply threshold
   } else if (grepl("24-073", sample_id)) {
     # Apply threshold for sample "24-073"
-    gating[exprs_data[, "PE-A"] >= 1.8] <- "Multimer+"
+    gating[exprs_data[, "PE-A"] >= 1.7 & exprs_data[, "cFluor B548-A"] > 0.75] <- "Multimer+"
   }
   
   # Add the gating result as a new column to the expression matrix
@@ -143,29 +144,15 @@ assayNames(sce_multimer)[1] <- "exprs"
 sce_multimer <- cluster(sce_multimer, features="type", maxK=10, seed=7460)
 
 
-sce_multimer <- runDR(sce_multimer, "UMAP", cells=10000, n_neighbors=100 , min_dist = 0.5, features = "type")
+sce_multimer <- runDR(sce_multimer, "UMAP", n_neighbors=100 , min_dist = 0.5, features = "type")
 
 
 #defining number of metaclusters 
 
 #Delta plot
 
-delta_data <- metadata(sce_multimer)$delta_area$data
+delta_area(sce_multimer)
 
-# Rename columns if needed (k and y for clarity)
-colnames(delta_data) <- c("k", "delta_area")
-
-# Create the delta plot
-library(ggplot2)
-ggplot(delta_data, aes(x = k, y = delta_area)) +
-  geom_line(color = "blue", size = 1) +
-  geom_point(color = "red", size = 2) +
-  labs(
-    title = "Elbow Plot for FlowSOM Clustering",
-    x = "Number of Clusters (k)",
-    y = "Delta Area under the Curve"
-  ) +
-  theme_minimal()
 
 #All UMAPs
 exprs <- assay(sce_multimer, "exprs")
@@ -174,6 +161,9 @@ exprs <- exprs[,c(marker_type)]
 umap <- uwot::umap(exprs, n_neighbors=100, min_dist = 0.5, ret_model = TRUE)
 reducedDim(sce_multimer, "UMAP")<- umap$embedding
 set.seed(6754)
+plotDR(sce_multimer, "UMAP", color_by="meta5")
+plotDR(sce_multimer, "UMAP", color_by="meta6")
+plotDR(sce_multimer, "UMAP", color_by="meta7")
 plotDR(sce_multimer, "UMAP", color_by="meta8")
 plotDR(sce_multimer, "UMAP", color_by="experiment")
 plotDR(sce_multimer, "UMAP", color_by="sample_id")
@@ -190,4 +180,15 @@ plotDR(sce_multimer, "UMAP", color_by="HLA-DR")
 
 plotExprHeatmap(sce_multimer, features = "type", by="cluster_id", k="meta8", scale = "never", q = 0, perc=TRUE, bars = FALSE)
 plotExprHeatmap(sce_multimer, features = "type", by="cluster_id", k="meta8", scale = "last", q = 0, perc=TRUE, bars = FALSE)
+
+#preparing data for MEM annotation
+cluster <- metadata(sce_multimer)$cluster_codes$meta8[match(colData(sce_multimer)$cluster_id, metadata(sce_multimer)$cluster_codes$som100)]
+exprs_matrix_with_meta <- cbind(exprs, cluster = cluster)
+exprs_matrix_with_meta <- as.data.frame(exprs_matrix_with_meta)
+
+#MEM
+
+mem_values <- MEM(exprs_matrix_with_meta, transform=FALSE, markers ="1:11,13:21,23:31,34")
+
+build_heatmaps(mem_values, only.MEMheatmap = TRUE, labels = TRUE, output.files=TRUE)
 
