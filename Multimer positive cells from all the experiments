@@ -20,6 +20,8 @@ library(cytoMEM)
 #library(scran)  
 library("diffcyt")
 library(dplyr)
+library(flowViz)
+library(flowDensity)
 ```
 
 ```{r All directories, message=FALSE}
@@ -27,7 +29,7 @@ setwd("~/Regina/IVA")
 
 fcs_dir<- file.path(getwd(), "02_data/other_patients/Multimer") 
 dir_transform <- file.path(getwd(), "02_data/other_patients/Multimer/transformed")
-
+dir_QC <- file.path(getwd(),"02_data/other_patients/Multimer/after_QC")
 ```
 
 ```{r, message=FALSE}
@@ -89,22 +91,16 @@ fcs_data <- load_fcs_as_flowset(fcs_dir)
 #fcs_data <- read.flowSet(files = filtered_files, transformation = FALSE, truncate_max_range = FALSE)
 ```
 
-
-
 ```{r, message=FALSE}
 # data frame of the panel
 fcs_colname <- colnames(fcs_data)
 marker_class <- rep("none", ncol(fcs_data[[1]]))
-marker_type <- c(8:12,14:17,19,21:23,26:28,31:36,38:43)
+marker_type <- c(8:12,14:17,21:23,26:28,32:36,38:40)
 marker_class[marker_type] <- "type" # markers that indicate surface markers, such as CD3, CD4, or markers that you do want to use for clustering
 marker_class <- factor(marker_class, levels=c("type", "none"))
 antigen <- pData(parameters(fcs_data[[1]]))$desc
 panel <- data.frame(fcs_colname, antigen, marker_class, row.names = NULL)
 ```
-
-
-
-
 
 ```{r, message=FALSE}
 #creating the metadata
@@ -122,13 +118,10 @@ rownames(md)  <- NULL
 kable(md)
 ```
 
-
 ```{r, message=FALSE}
 #downsample the data
 markerstotransform <- panel$fcs_colname[c(8:28,31:43)] 
 ```
-
-
 
 ```{r arcsinh transformation, message=FALSE}
 #tranform the data with FlowVS
@@ -138,26 +131,55 @@ cofactordata <- data.frame(markerstotransform, cofactors)
 fcs_transform <- transFlowVS(fcs_data, channels = markerstotransform, cofactors)
 ```
 
-
 ```{r Logicle transformation, NOT USED}
 #User defined logicle function for 1 flowFrame to optimize param
-lgcl <- logicleTransform(w = 0.3, t=10000, m =2.5, a=0.5)
-trans <- transformList(markerstotransform, lgcl)
-fcs_transform <- transform(fcs_data, trans) #transform all samples
+#lgcl <- logicleTransform(w = 0.3, t=10000, m =2.5, a=0.5)
+#trans <- transformList(markerstotransform, lgcl)
+#fcs_transform <- transform(fcs_data, trans) #transform all samples
 #Validation of the transformed channels
-autoplot(fcs_data[[2]]) 
-autoplot(fcs_transform[[2]]) 
-filenames <- paste(fcs_data@phenoData@data$name)
-sampleNames(fcs_transform) <- filenames
+#autoplot(fcs_data[[2]]) 
+#autoplot(fcs_transform[[2]]) 
+#filenames <- paste(fcs_data@phenoData@data$name)
+#sampleNames(fcs_transform) <- filenames
 #Save logicle_transformed FCS files
 
 #write.flowSet(fcs_transform, outdir = file.path(dir_transform), filename = filenames) 
 ```
 
+```{r flowCut Ha pipeline}
+
+#2.flowCut for flowSet CD3_lgcl
+fcs_QC<-flowCore::fsApply(fcs_transform, function(x)flowCut(x)) 
+fcs_QC   #show everything
+
+#3 Identify flowFrames with removed events based on the above info
+fcs_QC$'24-057 - CD14+ - CD8+.fcs'$data   #Live death channel: not important
+fcs_QC$'24-060 - CD14+ - CD8+.fcs'$data   #unknown channel?
+
+#Plots to see the removed events in worst channels
+fcs_QC$'24-057 - CD14+ - CD8+.fcs'$data  
+plotDens(fcs_transform$'24-075 - Ex Vivo - CD8+.fcs', c("time","buv395_a"),main="24-075 - Ex Vivo - CD8+.fcs")
+points(exprs(fcs_transform$'24-075 - Ex Vivo - CD8+.fcs')[fcs_QC$'24-075 - Ex Vivo - CD8+.fcs'$ind, c("time","buv395_a")], pch=".")
 
 
 
-```{r}
+#4.Convert flowCut list to a flowSet
+files <- list() 
+for(x in 1:length(fcs_QC)){
+  files<-append(files,list(fcs_QC[[x]]$frame))
+}
+fcs_QC<-flowSet(files)
+
+#5. Save if flowCut removed any events
+filenames <- paste(fcs_data@phenoData@data$name)
+write.flowSet(fcs_QC, outdir = file.path(dir_QC), filename = filenames)
+
+#6. Read
+fcs_QC <- read.flowSet(path=file.path(dir_QC), pattern="*.fcs", transformation = FALSE, truncate_max_range = FALSE)
+dim <- lapply(fcs_QC@frames, dim)
+```
+
+```{r flowCut QC}
 
 
 for (i in 1:15) {
@@ -175,66 +197,83 @@ for (i in 1:15) {
 
 ```
 
-```{r}
+```{r Gating Multimer+ cells}
 #create the gating strategy for Multimer+ cells
-autoplot(fcs_transform, "pe_a", "cfluor_b548_a")
-#autoplot(fcs_transform,  "PE-A")
+autoplot(fcs_QC, "pe_a", "cfluor_b548_a")
 
-rectGate <- rectangleGate(filterId = "Multimer+", "pe_a"=c(1.7, Inf), "cfluor_b548_a"=c(0.75, Inf))
-#result = filter(fcs_transform, rectGate)
-#summary(result)
+#1. Gating for patient 24-060
+rectGate <- rectangleGate(filterId = "Multimer+", "pe_a"=c(1.5, Inf), "cfluor_b548_a"=c(0.75, Inf))
 #create the gating set
-gs <- GatingSet(fcs_transform)
+gs <- GatingSet(fcs_QC[4:7])
 gs_pop_add(gs, rectGate, parent = "root")
 recompute(gs)
 
 autoplot(gs, "Multimer+")
 
-#filter(fcs_transform, rectGate)
-```
-```{r}
-# Define the PDF output file
-pdf("Gating_Strategy.pdf", width = 8, height = 6)  # Adjust size if needed
+#2. Gating for patient 24-073
+rectGate <- rectangleGate(filterId = "Multimer+", "pe_a"=c(1.7, Inf), "cfluor_b548_a"=c(0.75, Inf))
 
-
-# Define the rectangular gate
-rectGate <- rectangleGate(filterId = "Multimer+", "pe_a" = c(1.7, Inf), "cfluor_b548_a" = c(0.75, Inf))
-
-# Create the gating set
-gs <- GatingSet(fcs_transform[[1:3]])
+#create the gating set
+gs <- GatingSet(fcs_QC[8:11])
 gs_pop_add(gs, rectGate, parent = "root")
 recompute(gs)
 
-# Plot the gated population
 autoplot(gs, "Multimer+")
 
-# Close the PDF device to save the file
-dev.off()
+autoplot(gs, "Multimer+")
+
+#3. Gating for patient 24-057
+rectGate <- rectangleGate(filterId = "Multimer+", "pe_a"=c(1.8, Inf), "cfluor_b548_a"=c(0.75, Inf))
+
+#create the gating set
+gs <- GatingSet(fcs_QC[1:3])
+gs_pop_add(gs, rectGate, parent = "root")
+recompute(gs)
+
+autoplot(gs, "Multimer+")
+
+#4. Gating for patient 24-075
+rectGate <- rectangleGate(filterId = "Multimer+", "pe_a"=c(1.8, Inf), "cfluor_b548_a"=c(0.75, Inf))
+
+#create the gating set
+gs <- GatingSet(fcs_QC[12:15])
+gs_pop_add(gs, rectGate, parent = "root")
+recompute(gs)
+
+autoplot(gs, "Multimer+")
+
+
 ```
 
 
-```{r}
+
+```{r Filtering Multimer+ cells, message=FALSE}
 #filtering Multimer+ cells
 filtered_flowFrames <- list()
 
-for (i in seq_along(fcs_transform)) {
+for (i in seq_along(fcs_QC)) {
   # Access the expression data from the current flowFrame
-  exprs_data <- exprs(fcs_transform[[i]])
+  exprs_data <- exprs(fcs_QC[[i]])
   rownames(exprs_data) <- 1:nrow(exprs_data)
   
   # Get the sample name using sampleNames() or other methods
-  sample_id <- sampleNames(fcs_transform)[i]
+  sample_id <- sampleNames(fcs_QC)[i]
   
   # Create a gating column to classify cells
   gating <- rep("Non-multimer", nrow(exprs_data))  # Initialize all as Non-multimer
   
   # Apply threshold for sample "24-060"
   if (grepl("24-060", sample_id)) {
-    gating[exprs_data[, "PE-A"] >= 1.5 & exprs_data[, "cFluor B548-A"] > 0.75] <- "Multimer+"  # Apply threshold
+    gating[exprs_data[, "pe_a"] >= 1.5 & exprs_data[, "cfluor_b548_a"] > 0.75] <- "Multimer+"  # Apply threshold
   } else if (grepl("24-073", sample_id)) {
     # Apply threshold for sample "24-073"
-    gating[exprs_data[, "PE-A"] >= 1.7 & exprs_data[, "cFluor B548-A"] > 0.75] <- "Multimer+"
-  }
+    gating[exprs_data[, "pe_a"] >= 1.7 & exprs_data[, "cfluor_b548_a"] > 0.75] <- "Multimer+"
+  } else if (grepl("24-057", sample_id)) {
+    # Apply threshold for sample "24-073"
+    gating[exprs_data[, "pe_a"] >= 1.8 & exprs_data[, "cfluor_b548_a"] > 0.75] <- "Multimer+"
+  } else if (grepl("24-075", sample_id)) {
+    # Apply threshold for sample "24-073"
+    gating[exprs_data[, "pe_a"] >= 1.8 & exprs_data[, "cfluor_b548_a"] > 0.75] <- "Multimer+"}
   
   # Add the gating result as a new column to the expression matrix
   exprs_data <- cbind(exprs_data, gating)  # Add gating as new column
@@ -255,7 +294,7 @@ for (i in seq_along(fcs_transform)) {
   
   # Create a new flowFrame with the filtered numeric data
   filtered_flowFrame <- flowFrame(exprs = as.matrix(filtered_data_numeric), 
-                                  description = description(fcs_transform[[i]]))
+                                  description = description(fcs_QC[[i]]))
   
   
   # Store the filtered flowFrame in the list
@@ -265,7 +304,6 @@ for (i in seq_along(fcs_transform)) {
 }
 ```
 
-
 ```{r}
 # Assign file names (from md) to the filtered_flowFrames list
 #check if they are consistent
@@ -274,7 +312,6 @@ print(md[["file_name"]])
 #assign
 names(filtered_flowFrames) <- md[["file_name"]]
 ```
-
 
 ```{r}
 #clustering
@@ -323,7 +360,6 @@ plotDR(sce_multimer, "UMAP", color_by="Perforin")
 plotDR(sce_multimer, "UMAP", color_by="HLA-DR")
 ```
 
-
 ```{r}
 plotExprHeatmap(sce_multimer, features = "type", by="cluster_id", k="meta6", scale = "never", q = 0, perc=TRUE, bars = FALSE)
 plotExprHeatmap(sce_multimer, features = "type", by="cluster_id", k="meta6", scale = "last", q = 0, perc=TRUE, bars = FALSE)
@@ -336,15 +372,13 @@ exprs_matrix_with_meta <- cbind(exprs, cluster = cluster)
 exprs_matrix_with_meta <- as.data.frame(exprs_matrix_with_meta)
 ```
 
-
 ```{r}
 #MEM
 
-mem_values <- MEM(exprs_matrix_with_meta, transform=FALSE, markers ="1:11,13:21,23:31,34")
+mem_values <- MEM(exprs_matrix_with_meta, transform=FALSE)
 
 build_heatmaps(mem_values, only.MEMheatmap = TRUE, labels = TRUE, output.files=TRUE)
 ```
-
 
 ```{r}
 #PCA
@@ -370,7 +404,6 @@ colnames(colData(sce_multimer))[colnames(colData(sce_multimer)) == "patient_id.1
 clrDR(sce_multimer, dr = "PCA", by = "sample_id", k = "meta6",label_by ="patient_id", size_by = FALSE)
 ```
 
-
 ```{r}
 plotAbundances(sce_multimer, k = "meta6", by = "cluster_id", 
                group_by = "condition", shape_by = "patient_id")
@@ -383,8 +416,6 @@ plotAbundances(sce_multimer_subset, k = "meta6", by = "cluster_id",
 
 plotPbExprs(sce_multimer, facet_by = "antigen", ncol = 7, features="type")
 ```
-
-
 
 ```{r}
 #Differential analysis
@@ -406,8 +437,6 @@ res_DS <- diffcyt(sce_multimer, clustering_to_use = "meta6",
 tbl_DA <- rowData(res_DA$res)
 tbl_DS <- rowData(res_DS$res)
 ```
-
-
 
 
 
