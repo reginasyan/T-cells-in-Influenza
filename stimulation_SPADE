@@ -1,0 +1,131 @@
+---
+title: "Stimulation_SPADE"
+output: html_document
+date: "2025-03-04"
+---
+
+```{r , message=FALSE, warning=FALSE}
+#installing libraries
+set.seed(123)
+#library(spade)
+library("SPADEVizR")
+library("devtools")
+library(flowCore)
+library(flowViz)
+library(flowVS)
+library(flowAI)
+library(PeacoQC)
+library(CATALYST)
+library(CytoNorm)
+library(SingleCellExperiment)
+library(uwot)
+library(knitr)
+library(xlsx)
+library("flowCore")
+library("flowCut")
+library(ggcyto)
+library(cytoMEM)
+library("diffcyt")
+library(dplyr)
+library(flowViz)
+library(flowDensity)
+```
+
+```{r All_directories, message=FALSE, warning=FALSE}
+setwd("~/Regina/IVA")
+
+fcs_dir<- file.path(getwd(), "02_data/other_patients/Stimulation") 
+dir_transform <- file.path(getwd(), "02_data/other_patients/Stimulation/transformed")
+dir_QC <- file.path(getwd(),"02_data/other_patients/Stimulation/after_QC")
+dir_plots <- file.path(getwd(),"03_figures")
+dir_activated <- file.path(getwd(),"02_data/other_patients/Stimulation/activated_only")
+```
+
+
+
+
+```{r, message=FALSE, warning=FALSE}
+
+files <- list.files(fcs_dir, 
+                    pattern = "fcs", full.names = TRUE)
+
+clustering_markers <- c(
+  "apc_vio_770_a",
+  "alexa_fluor_594_a",
+  "alexa_fluor_647_a",
+  "alexa_fluor_700_a",
+  "bb700_a",
+  "buv395_a",
+  "buv496_a",
+  "buv563_a",
+  "buv615_a",
+  "buv661_a",
+  "buv737_a",
+  "bv421_a",
+  "bv480_a",
+  "bv510_a",
+  "bv570_a",
+  "bv605_a",
+  "bv711_a",
+  "bv750_a",
+  "bv786_a",
+  "pe_a",
+  "pe_cy5_a",
+  "pe_cy5_5_a",
+  "pe_cy7_a",
+  "pe_fire_744_a",
+  "pe_vio615_a",
+  "percp_efluor_710_a",
+  "spark_nir_685_a",
+  "spark_yg_581_a",
+  "efluor_450_a")
+
+# Function to standardize column names
+standardize_column_names <- function(col_names) {
+  col_names %>%
+    gsub("FJComp-", "", .) %>%  # Remove "FJComp-"
+    tolower() %>%               # Convert to lowercase
+    gsub("[^a-zA-Z0-9_]", "_", .) %>%  # Replace special characters with "_"
+    make.names(unique = TRUE)   # Ensure valid and unique column names
+}
+
+# Function to normalize column names in a single FCS file
+normalize_and_save <- function(fcs_file, output_dir) {
+  if (!file.exists(fcs_file)) {
+    stop(paste("File does not exist:", fcs_file))
+  }
+  
+  # Read FCS file
+  fcs_data <- read.FCS(fcs_file, transformation = FALSE)
+  
+  # Standardize column names
+  colnames(fcs_data) <- standardize_column_names(colnames(fcs_data))
+  
+  # Save the normalized FCS file
+  output_path <- file.path(output_dir, basename(fcs_file))
+  write.FCS(fcs_data, output_path)
+  return(output_path)
+}
+
+# Ensure output directory exists
+dir_fixed <- file.path(fcs_dir, "fixed")
+dir.create(dir_fixed, showWarnings = FALSE)
+
+# Get list of FCS files
+files <- list.files(fcs_dir, pattern = "\\.fcs$", full.names = TRUE)
+print(files)  # Debugging: Check file paths
+
+# Normalize and save new FCS files
+fixed_files <- sapply(files, normalize_and_save, output_dir = dir_fixed)
+
+# Run SPADE with the corrected column names
+SPADE.driver(fixed_files, 
+             file_pattern = ".fcs",
+             out_dir = dir_plots, 
+             downsampling_target_percent = 0.1,
+             cluster_cols = clustering_markers,
+             comp = FALSE, 
+             k = 200)
+
+
+```
