@@ -1,0 +1,425 @@
+---
+title: "CD14+_CD14-_moDC_exVivo_peptide"
+output: html_document
+date: "2025-03-03"
+---
+```{r , message=FALSE, warning=FALSE}
+#installing libraries
+set.seed(123)
+
+library("devtools")
+library(flowCore)
+library(flowViz)
+library(flowVS)
+library(flowAI)
+library(PeacoQC)
+library(CATALYST)
+library(CytoNorm)
+library(SingleCellExperiment)
+library(uwot)
+library(knitr)
+library(xlsx)
+library("flowCore")
+library("flowCut")
+library(ggcyto)
+library(cytoMEM)
+library("diffcyt")
+library(dplyr)
+library(flowViz)
+library(flowDensity)
+```
+
+```{r All_directories, message=FALSE, warning=FALSE}
+setwd("~/Regina/IVA")
+
+fcs_dir<- file.path(getwd(), "02_data/other_patients/Stimulation") 
+dir_transform <- file.path(getwd(), "02_data/other_patients/Stimulation/transformed")
+dir_QC <- file.path(getwd(),"02_data/other_patients/Stimulation/after_QC")
+dir_activated <- file.path(getwd(),"02_data/other_patients/Stimulation/activated_only")
+dir_plots <- file.path(getwd(),"03_figures")
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+
+# Function to extract and standardize column names
+standardize_column_names <- function(col_names) {
+  col_names %>%
+    gsub("FJComp-", "", .) %>%  # Remove "FJComp-"
+    tolower() %>%               # Convert to lowercase
+    gsub("[^a-zA-Z0-9_]", "_", .) %>%  # Replace special characters with "_"
+    make.names(unique = TRUE)   # Ensure valid and unique column names
+}
+
+# Load and process FCS files into a flowSet with unified column names
+load_fcs_as_flowset <- function(fcs_dir) {
+  fcs_files <- list.files(fcs_dir, pattern = "\\.fcs$", full.names = TRUE)
+  
+  if (length(fcs_files) == 0) {
+    stop("No FCS files found in the specified directory: ", fcs_dir)
+  }
+  
+  # Read all files and store them as a named list of flowFrames
+  flow_frames <- setNames(lapply(fcs_files, function(file) {
+    fcs_data <- read.FCS(file, transformation = FALSE, truncate_max_range = FALSE)
+    colnames(fcs_data) <- standardize_column_names(colnames(fcs_data))  # Standardize column names
+    return(fcs_data)
+  }), basename(fcs_files))  # Name each flowFrame with its file name
+  
+  # Get the union of all column names across files
+  all_columns <- unique(unlist(lapply(flow_frames, colnames)))
+
+  # Ensure all flowFrames have the same column names
+  flow_frames <- lapply(flow_frames, function(f) {
+    missing_cols <- setdiff(all_columns, colnames(f))
+    if (length(missing_cols) > 0) {
+      for (col in missing_cols) {
+        f <- cbind(f, matrix(NA, nrow = nrow(f), ncol = 1))  # Add missing columns as NA
+        colnames(f)[ncol(f)] <- col
+      }
+    }
+    return(f)
+  })
+
+  # Convert to a flowSet and assign sample names
+  flow_set <- as(flow_frames, "flowSet")
+  sampleNames(flow_set) <- names(flow_frames)  # Assign file names to flowSet samples
+
+  return(flow_set)
+}
+
+
+# Load FCS files into a unified flowSet with file names
+fcs_data <- load_fcs_as_flowset(fcs_dir)
+
+
+#all_files <- list.files(path = fcs.dir, pattern = "\\.fcs$", full.names = TRUE)
+#filtered_files <- all_files[!grepl("CD8\\+Multimer\\+", all_files) & !grepl("Ex Vivo", all_files)]
+#fcs_data <- read.flowSet(files = filtered_files, transformation = FALSE, truncate_max_range = FALSE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+# data frame of the panel
+fcs_colname <- colnames(fcs_data)
+marker_class <- rep("none", ncol(fcs_data[[1]]))
+marker_type <- c(8:13,14:18,20:24, 26:28,31:36,38:40, 43)
+marker_class[marker_type] <- "type" # markers that indicate surface markers, such as CD3, CD4, or markers that you do want to use for clustering
+marker_class <- factor(marker_class, levels=c("type", "none"))
+antigen <- pData(parameters(fcs_data[[1]]))$desc
+panel <- data.frame(fcs_colname, antigen, marker_class, row.names = NULL)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#creating the metadata
+files <- list.files(fcs_dir, 
+                    pattern = "fcs",
+                    full.names = TRUE)
+file_name <- fsApply(fcs_data, identifier)
+md <- data.frame(file_name = file_name)
+md$sample_id <- gsub("\\.fcs", "", basename(md$file_name))
+md$patient_id <- sapply(strsplit(md$sample_id, " - "), function(x) x[1])
+md$experiment <- sapply(strsplit(md$sample_id, " - "), function(x) x[2])
+md$cells <- sapply(strsplit(md$sample_id, " - "), function(x) x[3])
+md$experiment_cells <- paste(md$experiment, md$cells, sep = "_")
+rownames(md)  <- NULL
+kable(md)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#downsample the data
+markerstotransform <- panel$fcs_colname[c(8:28,31:43)] 
+
+#Downsampling_FlowSet <- function(x, samplesize , replace=TRUE, prob=NULL){
+#  if(missing(samplesize))
+#    samplesize <- min(flowCore::fsApply(x,nrow))
+#  flowCore::fsApply(x, function(ff){
+#    i <- sample(nrow(ff), size = samplesize, replace=replace, prob)
+#    ff[i,]
+#  })
+#}
+
+#fcs_data_small <- Downsampling_FlowSet(x=fcs_data, samplesize = 2000)
+```
+
+```{r arcsinh_transformation_NOT_USED, message=FALSE, warning=FALSE}
+#tranform the data with FlowVS
+#cofactors <- estParamFlowVS(fcs_data_small, channels=markerstotransform)
+#saveRDS(cofactors, file = "C:/Users/Admin/Documents/Regina/IVA/04_exports/cofactors_stimulation.rds")
+#cofactors <- readRDS(file = "C:/Users/Admin/Documents/Regina/IVA/04_exports/cofactors_stimulation.rds")
+#cofactordata <- data.frame(markerstotransform, cofactors)
+#fcs_transform <- transFlowVS(fcs_data, channels = markerstotransform, cofactors)
+```
+
+
+```{r Logicle_transformation, message=FALSE, warning=FALSE}
+#User defined logicle function for 1 flowFrame to optimize param
+lgcl <- logicleTransform(w = 0.3, t=10000, m =2.5, a=0.5)
+trans <- transformList(markerstotransform, lgcl)
+fcs_transform <- transform(fcs_data, trans) #transform all samples
+#Validation of the transformed channels
+autoplot(fcs_data[[2]]) 
+autoplot(fcs_transform[[2]]) 
+filenames <- paste(fcs_data@phenoData@data$name)
+sampleNames(fcs_transform) <- filenames
+#Save logicle_transformed FCS files
+
+write.flowSet(fcs_transform, outdir = file.path(dir_transform), filename = filenames) 
+```
+
+```{r flowCut_Ha_pipeline, message=FALSE, warning=FALSE}
+
+#2.flowCut for flowSet CD3_lgcl
+fcs_QC<-flowCore::fsApply(fcs_transform, function(x)flowCut(x)) 
+fcs_QC   #show everything
+
+#3 Identify flowFrames with removed events based on the above info
+#fcs_QC$'24-057 - CD14+ - CD8+.fcs'$data   #Live death channel: not important
+#fcs_QC$'24-060 - CD14+ - CD8+.fcs'$data   #unknown channel?
+
+#Plots to see the removed events in worst channels
+#fcs_QC$'24-075 - Ex Vivo Pept activated - CD8+.fcs'$data  
+#plotDens(fcs_transform$'24-075 - Ex Vivo Pept activated - CD8+.fcs', c("time","buv395_a"),main="24-075 - Ex Vivo Pept activated - CD8+.fcs")
+#points(exprs(fcs_transform$'24-075 - Ex Vivo - CD8+.fcs')[fcs_QC$'24-075 - Ex Vivo - CD8+.fcs'$ind, c("time","buv395_a")], pch=".")
+
+
+
+#4.Convert flowCut list to a flowSet
+files <- list() 
+for(x in 1:length(fcs_QC)){
+  files<-append(files,list(fcs_QC[[x]]$frame))
+}
+fcs_QC<-flowSet(files)
+
+#5. Save if flowCut removed any events
+filenames <- paste(fcs_data@phenoData@data$name)
+write.flowSet(fcs_QC, outdir = file.path(dir_QC), filename = filenames)
+
+#6. Read
+fcs_QC <- read.flowSet(path=file.path(dir_QC), pattern="*.fcs", transformation = FALSE, truncate_max_range = FALSE)
+dim <- lapply(fcs_QC@frames, dim)
+
+```
+
+```{r flowCut_QC, message=FALSE, warning=FALSE}
+
+
+#for (i in 1:15) {
+  # Get the filename for the i-th FCS file
+#  file_name <- basename(fcs_transform[[i]]@description$FILENAME)
+  
+  # Access the parameters and update the 'desc' field
+  #fcs_transform[[i]]@parameters@data[["desc"]] <- fcs_transform[[i]]@parameters@data[["name"]]
+  
+  # Apply the flowCut function for each sample
+#  res_flowCut <- flowCut(fcs_transform[[i]], FileID = file_name, Plot = "All", Segment = 1000)
+  
+#}
+  
+
+```
+
+```{r Gating_Multimer_cells, message=FALSE, warning=FALSE}
+#create the gating strategy for Multimer+ cells
+autoplot(fcs_QC, "buv395_a", "bv750_a")
+
+#1. Gating 
+rectGate <- rectangleGate(filterId = "Activated", "buv395_a"=c(2, Inf), "bv750_a"=c(1.6, Inf))
+#create the gating set
+gs <- GatingSet(fcs_QC)
+gs_pop_add(gs, rectGate, parent = "root")
+recompute(gs)
+
+autoplot(gs, "Activated")
+
+
+
+```
+
+
+
+```{r Filtering_Multimer_cells, message=FALSE, warning=FALSE}
+#filtering Multimer+ cells
+filtered_flowFrames <- list()
+
+for (i in seq_along(fcs_QC)) {
+  # Access the expression data from the current flowFrame
+  exprs_data <- exprs(fcs_QC[[i]])
+  rownames(exprs_data) <- 1:nrow(exprs_data)
+  
+  # Get the sample name
+  sample_id <- sampleNames(fcs_QC)[i]
+  
+  # Create a gating column to classify cells
+  gating <- rep("Non-activated", nrow(exprs_data))  # Initialize all as Non-multimer
+  
+  # Apply threshold for activated cells
+  gating[which(exprs_data[, "buv395_a"] >= 2 & exprs_data[, "bv750_a"] > 1.6)] <- "Activated"
+  
+  # Add the gating result as a new column to the expression matrix
+  exprs_data <- cbind(exprs_data, gating)  # Add gating as new column
+  
+  # Filter for Multimer+ cells only
+  filtered_data <- exprs_data[exprs_data[, "gating"] == "Activated", ]
+  
+  if (nrow(filtered_data) > 0) {  # Ensure there are activated cells before proceeding
+    # Convert the filtered data to numeric while keeping column names
+    filtered_data_numeric <- apply(filtered_data[, -ncol(filtered_data)], 2, as.numeric)
+    
+    # Ensure that the column names are properly retained after conversion
+    colnames(filtered_data_numeric) <- colnames(filtered_data)[-ncol(filtered_data)]
+    
+    # Create a new flowFrame with the filtered numeric data
+    filtered_flowFrame <- flowFrame(exprs = as.matrix(filtered_data_numeric), 
+                                    description = description(fcs_QC[[i]]))
+    
+    # Store the filtered flowFrame in the list
+    filtered_flowFrames[[i]] <- filtered_flowFrame
+  }
+}
+
+
+```
+
+```{r , message=FALSE, warning=FALSE}
+# Assign file names (from md) to the filtered_flowFrames list
+#check if they are consistent
+print(filtered_flowFrames[[i]]@description[["GUID"]])
+print(md[["file_name"]])
+#assign
+names(filtered_flowFrames) <- md[["file_name"]]
+
+
+# Save each filtered flowFrame as an FCS file
+for (i in seq_along(filtered_flowFrames)) {
+  if (!is.null(filtered_flowFrames[[i]])) {  # Ensure the frame exists
+    sample_name <- names(filtered_flowFrames)[i]  # Get the assigned sample name
+    file_path <- file.path(dir_activated, paste0(sample_name, "_activated.fcs"))  # Define the output file path
+    write.FCS(filtered_flowFrames[[i]], file_path)  # Save the file
+  }
+}
+
+# Confirm saved files
+list.files(dir_activated, pattern = "*.fcs")
+```
+
+```{r , message=FALSE, warning=FALSE}
+#clustering
+
+sce_activated<- prepData(filtered_flowFrames, md=md, panel= panel, FACS = TRUE, transform=FALSE, md_cols =list(file="file_name", id="patient_id", factors=c("cells", "experiment", "patient_id","experiment_cells")))
+
+assayNames(sce_activated)[1] <- "exprs"
+sce_activated <- cluster(sce_activated, features="type", maxK=10, seed=7460)
+
+
+sce_activated <- runDR(sce_activated, "UMAP", n_neighbors=100 , min_dist = 0.5, features = "type")
+```
+
+```{r , message=FALSE, warning=FALSE}
+#defining number of metaclusters 
+
+#Delta plot
+
+delta_area(sce_activated)
+
+```
+
+```{r , message=FALSE, warning=FALSE}
+#All UMAPs
+exprs <- assay(sce_activated, "exprs")
+exprs <- t(exprs)
+exprs <- exprs[,c(marker_type)]
+umap <- uwot::umap(exprs, n_neighbors=100, min_dist = 0.5, ret_model = TRUE)
+reducedDim(sce_activated, "UMAP")<- umap$embedding
+set.seed(6754)
+plotDR(sce_activated, "UMAP", color_by="meta5")
+plotDR(sce_activated, "UMAP", color_by="meta6")
+plotDR(sce_activated, "UMAP", color_by="meta7")
+plotDR(sce_activated, "UMAP", color_by="meta8")
+plotDR(sce_activated, "UMAP", color_by="experiment")
+plotDR(sce_activated, "UMAP", color_by="sample_id")
+plotDR(sce_activated, "UMAP", color_by="meta6", facet_by = "experiment")
+plotDR(sce_activated, "UMAP", color_by="meta6", facet_by = "sample_id")
+plotDR(sce_activated, "UMAP", color_by="CD26")
+plotDR(sce_activated, "UMAP", color_by="CD73")
+plotDR(sce_activated, "UMAP", color_by="CCR7")
+plotDR(sce_activated, "UMAP", color_by="TIGIT")
+plotDR(sce_activated, "UMAP", color_by="CD39")
+plotDR(sce_activated, "UMAP", color_by="CD40L")
+plotDR(sce_activated, "UMAP", color_by="Perforin")
+plotDR(sce_activated, "UMAP", color_by="HLA-DR")
+```
+
+```{r , message=FALSE, warning=FALSE}
+plotExprHeatmap(sce_activated, features = "type", by="cluster_id", k="meta6", scale = "never", q = 0, perc=TRUE, bars = FALSE)
+plotExprHeatmap(sce_activated, features = "type", by="cluster_id", k="meta6", scale = "last", q = 0, perc=TRUE, bars = FALSE)
+```
+
+```{r , message=FALSE, warning=FALSE}
+#preparing data for MEM annotation
+cluster <- metadata(sce_activated)$cluster_codes$meta6[match(colData(sce_activated)$cluster_id, metadata(sce_activated)$cluster_codes$som100)]
+exprs_matrix_with_meta <- cbind(exprs, cluster = cluster)
+exprs_matrix_with_meta <- as.data.frame(exprs_matrix_with_meta)
+```
+
+```{r , message=FALSE, warning=FALSE}
+#MEM
+
+mem_values <- MEM(exprs_matrix_with_meta, transform=FALSE)
+
+build_heatmaps(mem_values, only.MEMheatmap = TRUE, labels = TRUE, output.files=TRUE)
+```
+
+```{r , message=FALSE, warning=FALSE}
+#PCA
+colnames(colData(sce_activated))[colnames(colData(sce_activated)) == "experiment"] <- "condition"
+#colnames(colData(sce_activated))[colnames(colData(sce_activated)) == "patient"] <- "patient_id"
+
+
+colData(sce_activated)$sample_id <- paste0(
+  colData(sce_activated)$sample_id, "_", 
+  colData(sce_activated)$condition
+)
+
+sce_activated$sample_id <- as.factor(sce_activated$sample_id)
+
+
+clrDR(sce_activated,dr = "PCA", by = "cluster_id", k = "meta6", size_by = FALSE)
+
+pbMDS(sce_activated, by = "both", k = "meta6", features = "type",
+     shape_by = "condition", size_by = TRUE)
+
+
+colnames(colData(sce_activated))[colnames(colData(sce_activated)) == "patient_id.1"] <- "patient_id"
+
+pca_plot <- clrDR(sce_activated, dr = "PCA", by = "sample_id", k = "meta6",label_by ="patient_id", size_by = FALSE)
+ggsave("PCA_all_activated_cells.pdf", plot = pca_plot, device = "pdf", path = dir_plots)
+```
+
+```{r , message=FALSE, warning=FALSE}
+plotAbundances(sce_activated, k = "meta6", by = "cluster_id", 
+               group_by = "condition", shape_by = "patient_id")
+
+
+plotPbExprs(sce_activated, facet_by = "antigen", ncol = 7, features="type")
+```
+
+```{r , message=FALSE, warning=FALSE}
+#Differential analysis
+#create design & contrast matrix
+#design <- createDesignMatrix(ei(sce_multimer), cols_design = "condition")
+#contrast <- createContrast(c(0, 1))
+
+# test for
+# - differential abundance (DA) of clusters
+# - differential states (DS) within clusters
+#res_DA <- diffcyt(sce_multimer, clustering_to_use = "meta6",
+#                  analysis_type = "DA", method_DA = "diffcyt-DA-edgeR",
+#                  design = design, contrast = contrast, verbose = FALSE)
+#res_DS <- diffcyt(sce_multimer, clustering_to_use = "meta6",
+#                  analysis_type = "DS", method_DS = "diffcyt-DS-limma",
+#                  design = design, contrast = contrast, verbose = FALSE)
+
+# extract result tables
+#tbl_DA <- rowData(res_DA$res)
+#tbl_DS <- rowData(res_DS$res)
+```
