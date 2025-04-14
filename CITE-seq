@@ -1,0 +1,1014 @@
+### R_script for Influenza vaccinated participants PMID : 38697118
+## Created By Regina Shaikhutdinova
+# 2025
+# Modified 
+
+options(stringsAsFactors = F)
+setwd("~/Documents/flu_single_cell_data_2023_11_05/data")
+
+
+# Libraries
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+library(DESeq2)
+
+
+
+#HD <- readRDS("FO_h1h5_annotated_with_meta_V2_to_V3.rds")
+#HD <- readRDS("FO_notclean_Mono_DC.rds")
+#HD <- readRDS("FO_Mono_DC.rds")
+#HD <- readRDS("FO_MonoDS_DC_D0D1.rds")
+#HD <- readRDS("FO_MonoDS_DC_D0D1_noAS03.rds")
+
+#dc <- readRDS("FO_DC.rds")
+#mono <- readRDS("FO_Mono.rds")
+#HD <- readRDS("FO_Mono_DC_downsample.rds")
+
+#List Prot CITEseq
+rownames(HD[["CITE"]])
+#Default Assay
+DefaultAssay(HD)
+#Change default Assay
+DefaultAssay(HD) <- "CITE"
+DefaultAssay(HD) <- "RNA"
+#extract metadata
+metadata <- HD[[]]
+#list of metadata existing
+colnames(metadata)
+
+# Pre-processing ==========================================================
+
+
+#HD[["percent.mt"]] <- PercentageFeatureSet(HD, pattern = "^MT-")
+#VlnPlot(HD, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+#DefaultAssay(HD) <- "CITE"
+#VlnPlot(HD, features = c("AnnexinV-PROT"))
+
+
+#load the dataset and add metadata
+HD <- readRDS("h1h5_annotated_with_meta.rds")
+HD <- UpdateSeuratObject(HD)
+HDv4 <- readRDS("flu_vacc_CITEseq_Seurat4.rds")
+metadata <- HDv4[[]]
+HD <- AddMetaData(HD, metadata = metadata)
+HD[[]]
+rm(HDv4)
+
+#Normalize RNA data
+DefaultAssay(HD) <- "RNA"
+HD <- NormalizeData(HD)
+HD <- FindVariableFeatures(HD, selection.method = "vst", nfeatures = 2000)
+s.genes <-cc.genes$s.genes
+g2m.genes<-cc.genes$g2m.genes
+HD <- CellCycleScoring(HD, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+HD <- ScaleData(HD, vars.to.regress = c("S.Score", "G2M.Score"))
+
+#Normalize CITE data
+DefaultAssay(HD) <- "CITE"
+HD <- NormalizeData(HD, normalization.method = "CLR", margin = 2)
+HD <- FindVariableFeatures(HD, selection.method = "vst", nfeatures = 2000)
+HD <- ScaleData(HD)
+
+
+#CITE data
+HD <- RunPCA(HD, assay = "CITE", reduction.name = "pca.cite", reduction.key = "CITE_")
+HD <- RunUMAP(HD, reduction = "pca.cite", dims = 1:18, reduction.name = "umap.cite", reduction.key = "CITE_")
+DimPlot(HD, reduction = "umap.cite", group.by = "sampleid")
+FeaturePlot(HD, features = c("CD3-PROT"), reduction = "umap.cite")
+FeaturePlot(HD, features = c("CD1c-PROT", "CD14-PROT", "CD16-PROT"), reduction = "umap.cite")
+
+#monocytes
+FeaturePlot(HD, features = c("CD14-PROT", "CD16-PROT", "CD64-PROT", "CX3CR1-PROT"), reduction = "umap.cite")
+
+#DC type 2
+FeaturePlot(HD, features = c("CD1c-PROT", "CD14-PROT", "CD163-PROT", "CD11c-PROT", "HLA-DR-PROT"), reduction = "umap.cite")
+
+#DC type 3
+FeaturePlot(HD, features = c("CD1c-PROT", "CD14-PROT", "CD163-PROT"), reduction = "umap.cite")
+
+
+
+#RNA data
+DefaultAssay(HD) <- "RNA"
+HD <- RunPCA(HD)
+HD <- RunUMAP(HD, reduction = "pca", dims = 1:50, min.dist = 0.6)
+DimPlot(object = HD, group.by = "sampleid", reduction = "umap")
+
+#monocytes
+FeaturePlot(HD, features = c("CD14", "FCGR3A", "FCGR1A", "CX3CR1"), reduction = "umap")
+
+#DC type 2
+FeaturePlot(HD, features = c("CD1C", "CD14", "CD163", "ITGAX", "HLA-DRA"), reduction = "umap")
+
+#DC type 3
+FeaturePlot(HD, features = c("CD1C", "CD14", "CD163"), reduction = "umap")
+
+DimPlot(object = HD, group.by = "timepoint", reduction = "umap")
+#saveRDS(HD, "FO_h1h5_annotated_with_meta_V2_to_V3.rds")
+
+
+#Excluding AS03 condition
+DimPlot(object = HD, group.by = "adjmfc.group", reduction = "umap")
+HD <- subset(HD, subset = adjmfc.group == "AS03", invert = TRUE)
+DimPlot(object = HD, group.by = "adjmfc.group", reduction = "umap")
+
+HD <- RunPCA(HD)
+HD <- RunUMAP(HD, reduction = "pca", dims = 1:50, min.dist = 0.6)
+DimPlot(HD, reduction = "umap", group.by = "celltype_joint")
+HD <- FindNeighbors(HD, reduction = "pca", dims = 1:50)
+HD <- FindClusters(HD, resolution = 0.2)
+DimPlot(HD, reduction = "umap", group.by = "seurat_clusters")
+#saveRDS(HD, "FO_Full_noAS03.rds")
+
+markers <- FindAllMarkers(HD, min.pct = 0.25, logfc.threshold = 0.25, assay = "RNA")
+top_markers <- markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 4, order_by = avg_log2FC)
+
+print(top_markers, n=64)
+
+VlnPlot(HD, features = c("IRF8", "CADM1", "CLEC9A", "XCR1", "BATF3", "CD141-PROT"), pt.size=0, group.by = "seurat_clusters")
+
+
+#subset monocytes and DC
+Mo_DC <- subset(HD, idents = c("1", "11", "6", "8", "15"))
+
+#RNA data
+DefaultAssay(Mo_DC) <- "RNA"
+Mo_DC <- NormalizeData(Mo_DC, normalization.method = "LogNormalize", scale.factor = 10000)
+Mo_DC <- FindVariableFeatures(Mo_DC, selection.method = "vst", nfeatures = 2000)
+s.genes <-cc.genes$s.genes
+g2m.genes<-cc.genes$g2m.genes
+Mo_DC <- CellCycleScoring(Mo_DC, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+Mo_DC <- ScaleData(Mo_DC, vars.to.regress = c("S.Score", "G2M.Score"))
+Mo_DC <- RunPCA(Mo_DC)
+Mo_DC <- RunUMAP(Mo_DC, reduction = "pca", dims = 1:50, min.dist = 0.6)
+DimPlot(object = Mo_DC, group.by = "celltype_joint", reduction = "umap")
+Mo_DC <- FindNeighbors(Mo_DC, reduction = "pca", dims = 1:50)
+Mo_DC <- FindClusters(Mo_DC, reduction = "pca", resolution = 0.1)
+DimPlot(Mo_DC, reduction = "umap", group.by = "seurat_clusters")
+VlnPlot(Mo_DC, features = c("CD14", "FCGR3A", "CD14-PROT", "CD16-PROT", "ITGAM", "HLA-DRA", "CD11b-PROT"), pt.size=0, group.by = "seurat_clusters")
+
+#CITE data
+DefaultAssay(Mo_DC) <- "CITE"
+Mo_DC <- NormalizeData(Mo_DC, normalization.method = "CLR", margin = 2)
+Mo_DC <- FindVariableFeatures(Mo_DC, selection.method = "vst", nfeatures = 2000)
+Mo_DC <- ScaleData(Mo_DC)
+
+#monocytes
+VlnPlot(Mo_DC, features = c("CD14", "FCGR3A",  "LYZ", "CX3CR1-PROT", "CD14-PROT", "CD16-PROT"), pt.size=0, group.by = "seurat_clusters")
+
+#DC type 2
+VlnPlot(Mo_DC, features = c("CD1C", "CD14", "CD163", "ITGAX", "HLA-DRA"), pt.size=0, group.by = "seurat_clusters")
+
+#DC type 3
+VlnPlot(Mo_DC, features = c("CD1C", "CD14", "CD163", "CD163-PROT"), pt.size=0, group.by = "seurat_clusters")
+
+#pDC
+VlnPlot(Mo_DC, features = c("IL3RA", "CLEC4C", "CCR7", "CD304"), pt.size=0, group.by = "seurat_clusters")
+
+#cDC1
+VlnPlot(Mo_DC, features = c("XCR1", "BATF3", "CLEC9A"), pt.size=0, group.by = "seurat_clusters")
+
+#AS-DC
+VlnPlot(Mo_DC, features = c("AXL", "SIGLE6", "IL3RA"), pt.size=0, group.by = "seurat_clusters")
+
+
+
+
+#RNA data
+markers <- FindAllMarkers(Mo_DC, min.pct = 0.25, logfc.threshold = 0.25, assay = "RNA")
+top_markers <- markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 4, order_by = avg_log2FC)
+
+print(top_markers, n=28)
+#write.csv(markers, "Mono_RNA_clusters_markers.csv")
+
+#CITE data
+markers <- FindAllMarkers(Mo_DC, min.pct = 0.25, logfc.threshold = 0.25, assay = "CITE")
+markers %>%
+  group_by(cluster) %>%
+  slice_max(n = 2, order_by = avg_log2FC)
+#write.csv(markers, "Mono_PROT_clusters_markers.csv")
+
+#annotation
+
+# First, create a vector with cluster names
+cluster_annotations <- c(
+  "classical monocytes",  # Cluster 0
+  "non-classical monocytes",  # Cluster 1
+  "DC2_3",  # Cluster 2
+  "pDC",  # Cluster 3
+  "intermediate monocytes",  # Cluster 4
+  "inflamed classical monocytes",  # Cluster 5
+  "nul",  # Cluster 6
+  "cDC1"  # Cluster 7
+)
+
+# Assign cluster annotations to the Seurat object
+names(cluster_annotations) <- levels(Mo_DC)  # Make sure the names match the cluster IDs
+Mo_DC <- RenameIdents(Mo_DC, cluster_annotations)
+Mo_DC[["cluster_annotations"]] <- Idents(Mo_DC)
+
+# View the updated metadata to ensure that the annotations are added correctly
+head(Mo_DC@meta.data)
+
+
+#DGE d0 vs d1=====================================================
+
+# pseudobulk the counts based on timepoint-celltype
+pseudo_Mo_DC <- AggregateExpression(Mo_DC, assays = "RNA",slot = "counts", return.seurat = TRUE, group.by = c("cluster_annotations", "timepoint", "sampleid"))
+
+
+pseudo_Mo_DC$cluster_annotations.timepoint <- paste(pseudo_Mo_DC$cluster_annotations, pseudo_Mo_DC$timepoint, sep = "_")
+table(pseudo_Mo_DC$cluster_annotations.timepoint)
+
+
+
+
+#classical monocytes
+
+bulk.cMo.de <- FindMarkers(object = pseudo_Mo_DC, 
+                           ident.1 = "classical monocytes_d1", 
+                           ident.2 = "classical monocytes_d0",
+                           test.use = "DESeq2")
+head(bulk.cMo.de, n = 15)
+bulk.cMo.de.filtered <- bulk.cMo.de %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.cMo.de.filtered[order(bulk.cMo.de.filtered$avg_log2FC), ], 50) # 43 genes found
+
+
+# Cap very low p-values to avoid -Inf
+bulk.cMo.de$log10_pval_adj <- -log10(pmax(bulk.cMo.de$p_val_adj, 1e-300))
+bulk.cMo.de$gene <- rownames(bulk.cMo.de)
+# Volcano plot
+top_genes$gene <- rownames(top_genes)
+top_genes$log10_pval_adj <- -log10(pmax(top_genes$p_val_adj, 1e-300))
+volcano_plot <- ggplot(bulk.cMo.de, aes(x = avg_log2FC, y = log10_pval_adj)) +
+  geom_point(aes(color = p_val_adj <= 0.05), alpha = 0.4) +
+  scale_color_manual(values = c("grey", "red")) +
+  geom_text_repel(data = top_genes, aes(label = gene), size = 3,
+                  box.padding = 0.35, point.padding = 0.5,
+                  max.overlaps = 50) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +  # Add vertical line at 0
+  labs(x = "Average Log2 Fold Change", 
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot: Classical Monocytes D1 vs D0") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(volcano_plot)
+
+
+# single cell DE
+Mo_DC@meta.data$cluster_severity <- paste(Mo_DC@meta.data$cluster_annotations, Mo_DC@meta.data$adjmfc.group, sep = "_")
+Mo_DC@meta.data$cluster_time <- paste(Mo_DC@meta.data$cluster_annotations, Mo_DC@meta.data$timepoint, sep = "_")
+Mo_DC@meta.data$cluster_severity_time <- paste(Mo_DC@meta.data$cluster_severity, Mo_DC@meta.data$timepoint, sep = "_")
+#DefaultAssay(Mo_DC) <- "RNA"
+DefaultAssay(Mo_DC) <- "CITE"
+Idents(Mo_DC) <- "cluster_time"
+cMo.de.markers <- FindMarkers(Mo_DC, ident.1 = "classical monocytes_d1", ident.2 = "classical monocytes_d0")
+# view results
+cMo.de.markers
+cMo.de.markers.filtered <- cMo.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(cMo.de.markers.filtered[order(cMo.de.markers.filtered$avg_log2FC), ], 50) # 7 genes and 0 proteins found
+
+
+#volcano
+# Add gene names and capped log10 p-values
+cMo.de.markers$gene <- rownames(cMo.de.markers)
+cMo.de.markers$log10_pval_adj <- -log10(pmax(cMo.de.markers$p_val_adj, 1e-300))
+
+top_genes_2$gene <- rownames(top_genes_2)
+top_genes_2$log10_pval_adj <- -log10(pmax(top_genes_2$p_val_adj, 1e-300))
+
+# Volcano plot
+volcano_plot_2 <- ggplot(cMo.de.markers, aes(x = avg_log2FC, y = log10_pval_adj)) +
+  geom_point(aes(color = p_val_adj <= 0.05), alpha = 0.4) +
+  scale_color_manual(values = c("grey", "red")) +
+  geom_text_repel(data = top_genes_2, aes(label = gene), size = 3,
+                  box.padding = 0.35, point.padding = 0.5,
+                  max.overlaps = 50) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(x = "Average Log2 Fold Change", 
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot: Classical Monocytes D1 vs D0 (CITE)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(volcano_plot_2)
+
+
+#non-classical monocytes
+
+bulk.cMo.de <- FindMarkers(object = pseudo_Mo_DC, 
+                           ident.1 = "non-classical monocytes_d1", 
+                           ident.2 = "non-classical monocytes_d0",
+                           test.use = "DESeq2")
+head(bulk.cMo.de, n = 15)
+bulk.cMo.de.filtered <- bulk.cMo.de %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.cMo.de.filtered[order(bulk.cMo.de.filtered$avg_log2FC), ], 50) # 43 genes found
+
+
+# Cap very low p-values to avoid -Inf
+bulk.cMo.de$log10_pval_adj <- -log10(pmax(bulk.cMo.de$p_val_adj, 1e-300))
+bulk.cMo.de$gene <- rownames(bulk.cMo.de)
+# Volcano plot
+top_genes$gene <- rownames(top_genes)
+top_genes$log10_pval_adj <- -log10(pmax(top_genes$p_val_adj, 1e-300))
+volcano_plot <- ggplot(bulk.cMo.de, aes(x = avg_log2FC, y = log10_pval_adj)) +
+  geom_point(aes(color = p_val_adj <= 0.05), alpha = 0.4) +
+  scale_color_manual(values = c("grey", "red")) +
+  geom_text_repel(data = top_genes, aes(label = gene), size = 3,
+                  box.padding = 0.35, point.padding = 0.5,
+                  max.overlaps = 50) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +  # Add vertical line at 0
+  labs(x = "Average Log2 Fold Change", 
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot: Non-classical Monocytes D1 vs D0") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(volcano_plot)
+
+
+# single cell DE
+#DefaultAssay(Mo_DC) <- "RNA"
+DefaultAssay(Mo_DC) <- "CITE"
+Idents(Mo_DC) <- "cluster_time"
+cMo.de.markers <- FindMarkers(Mo_DC, ident.1 = "non-classical monocytes_d1", ident.2 = "non-classical monocytes_d0")
+# view results
+cMo.de.markers
+cMo.de.markers.filtered <- cMo.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(cMo.de.markers.filtered[order(cMo.de.markers.filtered$avg_log2FC), ], 50) # 7 genes and 0 proteins found
+
+
+#volcano
+# Add gene names and capped log10 p-values
+cMo.de.markers$gene <- rownames(cMo.de.markers)
+cMo.de.markers$log10_pval_adj <- -log10(pmax(cMo.de.markers$p_val_adj, 1e-300))
+
+top_genes_2$gene <- rownames(top_genes_2)
+top_genes_2$log10_pval_adj <- -log10(pmax(top_genes_2$p_val_adj, 1e-300))
+
+# Volcano plot
+volcano_plot_2 <- ggplot(cMo.de.markers, aes(x = avg_log2FC, y = log10_pval_adj)) +
+  geom_point(aes(color = p_val_adj <= 0.05), alpha = 0.4) +
+  scale_color_manual(values = c("grey", "red")) +
+  geom_text_repel(data = top_genes_2, aes(label = gene), size = 3,
+                  box.padding = 0.35, point.padding = 0.5,
+                  max.overlaps = 50) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(x = "Average Log2 Fold Change", 
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot: Non-classical Monocytes D1 vs D0 (CITE)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(volcano_plot_2)
+
+
+#intermediate monocytes
+
+bulk.cMo.de <- FindMarkers(object = pseudo_Mo_DC, 
+                           ident.1 = "intermediate monocytes_d1", 
+                           ident.2 = "intermediate monocytes_d0",
+                           test.use = "DESeq2")
+head(bulk.cMo.de, n = 15)
+bulk.cMo.de.filtered <- bulk.cMo.de %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.cMo.de.filtered[order(bulk.cMo.de.filtered$avg_log2FC), ], 50) # 43 genes found
+
+
+# Cap very low p-values to avoid -Inf
+bulk.cMo.de$log10_pval_adj <- -log10(pmax(bulk.cMo.de$p_val_adj, 1e-300))
+bulk.cMo.de$gene <- rownames(bulk.cMo.de)
+# Volcano plot
+top_genes$gene <- rownames(top_genes)
+top_genes$log10_pval_adj <- -log10(pmax(top_genes$p_val_adj, 1e-300))
+volcano_plot <- ggplot(bulk.cMo.de, aes(x = avg_log2FC, y = log10_pval_adj)) +
+  geom_point(aes(color = p_val_adj <= 0.05), alpha = 0.4) +
+  scale_color_manual(values = c("grey", "red")) +
+  geom_text_repel(data = top_genes, aes(label = gene), size = 3,
+                  box.padding = 0.35, point.padding = 0.5,
+                  max.overlaps = 50) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +  # Add vertical line at 0
+  labs(x = "Average Log2 Fold Change", 
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot: Intermediate Monocytes D1 vs D0") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(volcano_plot)
+
+
+
+# single cell DE
+#DefaultAssay(Mo_DC) <- "RNA"
+DefaultAssay(Mo_DC) <- "CITE"
+Idents(Mo_DC) <- "cluster_time"
+cMo.de.markers <- FindMarkers(Mo_DC, ident.1 = "intermediate monocytes_d1", ident.2 = "intermediate monocytes_d0")
+# view results
+cMo.de.markers
+cMo.de.markers.filtered <- cMo.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(cMo.de.markers.filtered[order(cMo.de.markers.filtered$avg_log2FC), ], 50) # 7 genes and 0 proteins found
+
+
+#volcano
+# Add gene names and capped log10 p-values
+cMo.de.markers$gene <- rownames(cMo.de.markers)
+cMo.de.markers$log10_pval_adj <- -log10(pmax(cMo.de.markers$p_val_adj, 1e-300))
+
+top_genes_2$gene <- rownames(top_genes_2)
+top_genes_2$log10_pval_adj <- -log10(pmax(top_genes_2$p_val_adj, 1e-300))
+
+# Volcano plot
+volcano_plot_2 <- ggplot(cMo.de.markers, aes(x = avg_log2FC, y = log10_pval_adj)) +
+  geom_point(aes(color = p_val_adj <= 0.05), alpha = 0.4) +
+  scale_color_manual(values = c("grey", "red")) +
+  geom_text_repel(data = top_genes_2, aes(label = gene), size = 3,
+                  box.padding = 0.35, point.padding = 0.5,
+                  max.overlaps = 50) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(x = "Average Log2 Fold Change", 
+       y = "-Log10 Adjusted P-value",
+       title = "Volcano Plot: Intermediate Monocytes D1 vs D0 (CITE)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+print(volcano_plot_2)
+
+
+#DGE high responders vs low responders =====================================================
+
+# pseudobulk the counts based on timepoint-celltype
+pseudo_Mo_DC_2 <- AggregateExpression(Mo_DC, assays = "RNA", slot = "counts", return.seurat = TRUE, group.by = c("cluster_annotations", "timepoint", "adjmfc.group", "sampleid"))
+
+
+pseudo_Mo_DC_2$cluster_annotations.timepoint.severity <- paste(pseudo_Mo_DC_2$cluster_annotations, pseudo_Mo_DC_2$timepoint, pseudo_Mo_DC_2$adjmfc.group ,sep = "_")
+table(pseudo_Mo_DC_2$cluster_annotations.timepoint.severity)
+
+
+Idents(pseudo_Mo_DC_2) <- "cluster_annotations.timepoint.severity"
+
+#classical monocytes
+
+bulk.cMo.de_2 <- FindMarkers(object = pseudo_Mo_DC_2, 
+                             ident.1 = "classical monocytes_d0_ low", 
+                             ident.2 = "classical monocytes_d0_high",
+                             test.use = "DESeq2")
+head(bulk.cMo.de_2, n = 15)
+bulk.cMo.de_2.filtered <- bulk.cMo.de_2 %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.cMo.de_2.filtered[order(bulk.cMo.de_2.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+# single cell DE
+#DefaultAssay(Mo_DC) <- "RNA"
+DefaultAssay(Mo_DC) <- "CITE"
+Idents(Mo_DC) <- "cluster_severity_time"
+cMo.de.markers <- FindMarkers(Mo_DC, ident.1 = "classical monocytes_ low_d0", ident.2 = "classical monocytes_high_d0")
+# view results
+cMo.de.markers
+cMo.de.markers.filtered <- cMo.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(cMo.de.markers.filtered[order(cMo.de.markers.filtered$avg_log2FC), ], 50)
+
+
+#non-classical monocytes
+
+bulk.cMo.de_2 <- FindMarkers(object = pseudo_Mo_DC_2, 
+                             ident.1 = "non-classical monocytes_d1_ low", 
+                             ident.2 = "non-classical monocytes_d1_high",
+                             test.use = "DESeq2")
+head(bulk.cMo.de_2, n = 15)
+bulk.cMo.de_2.filtered <- bulk.cMo.de_2 %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.cMo.de_2.filtered[order(bulk.cMo.de_2.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+# single cell DE
+#DefaultAssay(Mo_DC) <- "RNA"
+DefaultAssay(Mo_DC) <- "CITE"
+Idents(Mo_DC) <- "cluster_severity_time"
+cMo.de.markers <- FindMarkers(Mo_DC, ident.1 = "non-classical monocytes_ low_d1", ident.2 = "non-classical monocytes_high_d1")
+# view results
+cMo.de.markers
+cMo.de.markers.filtered <- cMo.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(cMo.de.markers.filtered[order(cMo.de.markers.filtered$avg_log2FC), ], 50)
+
+#intermediate monocytes
+
+bulk.cMo.de_2 <- FindMarkers(object = pseudo_Mo_DC_2, 
+                             ident.1 = "intermediate monocytes_d0_ low", 
+                             ident.2 = "intermediate monocytes_d0_high",
+                             test.use = "DESeq2")
+head(bulk.cMo.de_2, n = 15)
+bulk.cMo.de_2.filtered <- bulk.cMo.de_2 %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.cMo.de_2.filtered[order(bulk.cMo.de_2.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+# single cell DE
+#DefaultAssay(Mo_DC) <- "RNA"
+DefaultAssay(Mo_DC) <- "CITE"
+Idents(Mo_DC) <- "cluster_severity_time"
+cMo.de.markers <- FindMarkers(Mo_DC, ident.1 = "intermediate monocytes_ low_d0", ident.2 = "intermediate monocytes_high_d0")
+# view results
+cMo.de.markers
+cMo.de.markers.filtered <- cMo.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(cMo.de.markers.filtered[order(cMo.de.markers.filtered$avg_log2FC), ], 50)
+
+#subset DC=================================================================================
+DC <- subset(Mo_DC, idents = c("2", "3", "7"))
+
+#RNA data
+DefaultAssay(DC) <- "RNA"
+DC <- NormalizeData(DC, normalization.method = "LogNormalize", scale.factor = 10000)
+DC <- FindVariableFeatures(DC, selection.method = "vst", nfeatures = 2000)
+s.genes <-cc.genes$s.genes
+g2m.genes<-cc.genes$g2m.genes
+DC <- CellCycleScoring(DC, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+DC <- ScaleData(DC, vars.to.regress = c("S.Score", "G2M.Score"))
+DC <- RunPCA(DC)
+DC <- RunUMAP(DC, reduction = "pca", dims = 1:50, min.dist = 0.6)
+DimPlot(object = DC, group.by = "celltype_joint", reduction = "umap")
+DC <- FindNeighbors(DC, reduction = "pca", dims = 1:50)
+DC <- FindClusters(DC, reduction = "pca", resolution = 0.5)
+DimPlot(DC, reduction = "umap", group.by = "seurat_clusters")
+
+
+#CITE data
+DefaultAssay(DC) <- "CITE"
+DC <- NormalizeData(DC, normalization.method = "CLR", margin = 2)
+DC <- FindVariableFeatures(DC, selection.method = "vst", nfeatures = 2000)
+DC <- ScaleData(DC)
+DC <- RunPCA(DC, assay = "CITE", reduction.name = "pca.cite", reduction.key = "CITE_")
+DC <- RunUMAP(DC, reduction = "pca.cite", dims = 1:18, reduction.name = "umap.cite", reduction.key = "CITE_")
+DC <- FindNeighbors(DC, reduction = "pca.cite", dims = 1:50)
+DC <- FindClusters(DC, reduction = "pca.cite", resolution = 0.5)
+DimPlot(DC, reduction = "umap.cite", group.by = "seurat_clusters")
+
+VlnPlot(DC, features = c("CD14", "FCGR3A", "FCGR1A", "CX3CR1", "CD1C", "CD163", "ITGAX", "IL3RA", "THBD"), pt.size=0, group.by = "seurat_clusters")
+
+#monocytes
+#VlnPlot(MDC, features = c("CD14", "FCGR3A",  "LYZ", "CX3CR1-PROT", "CD14-PROT", "CD16-PROT"), pt.size=0, group.by = "seurat_clusters")
+
+#DC type 2
+VlnPlot(DC, features = c("CD1C", "CD14",  "ITGAX", "HLA-DRA"), pt.size=0, group.by = "seurat_clusters")
+
+#DC type 3
+VlnPlot(DC, features = c("CD1C", "CD14", "CD163", "CD163-PROT"), pt.size=0, group.by = "seurat_clusters")
+
+#pDC
+VlnPlot(DC, features = c("IL3RA", "CLEC4C", "CCR7", "CD304"), pt.size=0, group.by = "seurat_clusters")
+
+#cDC1
+VlnPlot(DC, features = c("XCR1", "BATF3", "CLEC9A"), pt.size=0, group.by = "seurat_clusters")
+
+#AS-DC
+VlnPlot(DC, features = c("AXL", "SIGLE6", "IL3RA"), pt.size=0, group.by = "seurat_clusters")
+
+#trying to understand clustering of CD14 and CD163 markers
+
+FeaturePlot(DC, features = c("CD14", "CD163"), reduction = "umap")
+
+FeaturePlot(DC, features = c("CD14-PROT", "CD163-PROT"), reduction = "umap")
+
+#annotation
+
+# First, create a vector with cluster names
+cluster_annotations <- c(
+  "DC2",  # Cluster 0
+  "pDC",  # Cluster 1
+  "DC3",  # Cluster 2
+  "cDC1",  # Cluster 3
+  "AS-DC"  # Cluster 4
+)
+
+# Assign cluster annotations to the Seurat object
+names(cluster_annotations) <- levels(DC)  # Make sure the names match the cluster IDs
+DC <- RenameIdents(DC, cluster_annotations)
+DC[["cluster_annotations"]] <- Idents(DC)
+
+# View the updated metadata to ensure that the annotations are added correctly
+head(DC@meta.data)
+
+
+#creating new meta.data column for PCA
+DC@meta.data$cluster_severity <- paste(DC@meta.data$cluster_annotations, DC@meta.data$adjmfc.group, sep = "_")
+DC@meta.data$cluster_time <- paste(DC@meta.data$cluster_annotations, DC@meta.data$timepoint, sep = "_")
+DC@meta.data$cluster_severity_time <- paste(DC@meta.data$cluster_severity, DC@meta.data$timepoint, sep = "_")
+
+DC <- subset(DC, subset = timepoint == "d7", invert = TRUE)
+
+# Visualize PCA and color by the 'cluster_severity' column
+DimPlot(DC, reduction = "pca", group.by = "cluster_severity", pt.size = 1)
+DimPlot(DC, reduction = "pca.cite", group.by = "cluster_severity", pt.size = 1)
+
+DimPlot(DC, reduction = "pca", group.by = "cluster_time", pt.size = 1)
+DimPlot(DC, reduction = "pca.cite", group.by = "cluster_time", pt.size = 1)
+
+DimPlot(DC, reduction = "pca", group.by = "cluster_severity_time", pt.size = 1)
+DimPlot(DC, reduction = "pca.cite", group.by = "cluster_severity_time", pt.size = 1)
+
+#MDS
+DefaultAssay(DC) <- "RNA"
+## Before running MDS, we first calculate a distance matrix between all pairs of cells.  Here
+# we use a simple euclidean distance metric on all genes, using scale.data as input
+d <- dist(t(GetAssayData(DC, slot = "scale.data")))
+# Run the MDS procedure, k determines the number of dimensions
+mds <- cmdscale(d = d, k = 2)
+# cmdscale returns the cell embeddings, we first label the columns to ensure downstream
+# consistency
+colnames(mds) <- paste0("MDS_", 1:2)
+# We will now store this as a custom dimensional reduction called 'mds'
+DC[["mds"]] <- CreateDimReducObject(embeddings = mds, key = "MDS_", assay = DefaultAssay(DC))
+
+# We can now use this as you would any other dimensional reduction in all downstream functions
+DimPlot(DC, reduction = "mds", pt.size = 0.5, group.by = "cluster_severity")
+
+DefaultAssay(DC) <- "CITE"
+## Before running MDS, we first calculate a distance matrix between all pairs of cells.  Here
+# we use a simple euclidean distance metric on all genes, using scale.data as input
+d <- dist(t(GetAssayData(DC, slot = "scale.data")))
+# Run the MDS procedure, k determines the number of dimensions
+mds <- cmdscale(d = d, k = 2)
+# cmdscale returns the cell embeddings, we first label the columns to ensure downstream
+# consistency
+colnames(mds) <- paste0("MDS_", 1:2)
+# We will now store this as a custom dimensional reduction called 'mds'
+DC[["mds"]] <- CreateDimReducObject(embeddings = mds, key = "MDS_", assay = DefaultAssay(DC))
+
+# We can now use this as you would any other dimensional reduction in all downstream functions
+DimPlot(DC, reduction = "mds", pt.size = 0.5, group.by = "cluster_severity")
+
+
+#DGE d0 vs d1=====================================================
+
+# pseudobulk the counts based on timepoint-celltype
+pseudo_DC <- AggregateExpression(DC, assays = "RNA",slot = "counts", return.seurat = TRUE, group.by = c("cluster_annotations", "timepoint", "sampleid"))
+
+
+pseudo_DC$cluster_annotations.timepoint <- paste(pseudo_DC$cluster_annotations, pseudo_DC$timepoint, sep = "_")
+table(pseudo_DC$cluster_annotations.timepoint)
+
+
+Idents(pseudo_DC) <- "cluster_annotations.timepoint"
+
+#DC2
+
+bulk.DC2.de <- FindMarkers(object = pseudo_DC, 
+                            ident.1 = "DC2_d1", 
+                            ident.2 = "DC2_d0",
+                            test.use = "DESeq2")
+head(bulk.DC2.de, n = 15)
+bulk.DC2.de.filtered <- bulk.DC2.de %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.DC2.de.filtered[order(bulk.DC2.de.filtered$avg_log2FC), ], 50) # 4 genes found
+
+
+#wilcox
+bulk.DC2.de.wilcox <- FindMarkers(
+  object = pseudo_DC, 
+  ident.1 = "DC2_d1", 
+  ident.2 = "DC2_d0",
+  test.use = "wilcox"
+)
+
+bulk.DC2.de.wilcox.filtered <- bulk.DC2.de.wilcox %>%
+  filter(p_val_adj <= 0.05)
+top_genes_wilcox <- head(bulk.DC2.de.wilcox.filtered[order(bulk.DC2.de.wilcox.filtered$avg_log2FC), ], 50) # 0 genes found
+
+# single cell DE
+DefaultAssay(DC) <- "RNA"
+#DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_time"
+DC2.de.markers <- FindMarkers(DC, ident.1 = "DC2_d1", ident.2 = "DC2_d0")
+# view results
+DC2.de.markers
+DC2.de.markers.filtered <- DC2.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(DC2.de.markers.filtered[order(DC2.de.markers.filtered$avg_log2FC), ], 50) # 7 genes and 0 proteins found
+
+
+#DC3
+
+bulk.DC3.de <- FindMarkers(object = pseudo_DC, 
+                           ident.1 = "DC3_d1", 
+                           ident.2 = "DC3_d0",
+                           test.use = "DESeq2")
+head(bulk.DC3.de, n = 15)
+bulk.DC3.de.filtered <- bulk.DC3.de %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.DC3.de.filtered[order(bulk.DC3.de.filtered$avg_log2FC), ], 50) # 4 genes found
+
+
+#wilcox
+bulk.DC3.de.wilcox <- FindMarkers(
+  object = pseudo_DC, 
+  ident.1 = "DC3_d1", 
+  ident.2 = "DC3_d0",
+  test.use = "wilcox"
+)
+
+bulk.DC3.de.wilcox.filtered <- bulk.DC3.de.wilcox %>%
+  filter(p_val_adj <= 0.05)
+top_genes_wilcox <- head(bulk.DC3.de.wilcox.filtered[order(bulk.DC3.de.wilcox.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+
+
+# single cell DE
+DefaultAssay(DC) <- "RNA"
+#DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_time"
+DC3.de.markers <- FindMarkers(DC, ident.1 = "DC3_d1", ident.2 = "DC3_d0")
+# view results
+DC3.de.markers
+DC3.de.markers.filtered <- DC3.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(DC3.de.markers.filtered[order(DC3.de.markers.filtered$avg_log2FC), ], 50) # 3 genes and 1 protein found
+
+
+#pDC
+
+bulk.pDC.de <- FindMarkers(object = pseudo_DC, 
+                           ident.1 = "pDC_d1", 
+                           ident.2 = "pDC_d0",
+                           test.use = "DESeq2")
+head(bulk.pDC.de, n = 15)
+bulk.pDC.de.filtered <- bulk.pDC.de %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.pDC.de.filtered[order(bulk.pDC.de.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+#wilcox
+bulk.pDC.de.wilcox <- FindMarkers(
+  object = pseudo_DC, 
+  ident.1 = "pDC_d1", 
+  ident.2 = "pDC_d0",
+  test.use = "wilcox"
+)
+
+bulk.pDC.de.wilcox.filtered <- bulk.pDC.de.wilcox %>%
+  filter(p_val_adj <= 0.05)
+top_genes_wilcox <- head(bulk.pDC.de.wilcox.filtered[order(bulk.pDC.de.wilcox.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+
+# single cell DE
+#DefaultAssay(DC) <- "RNA"
+DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_time"
+pDC.de.markers <- FindMarkers(DC, ident.1 = "pDC_d1", ident.2 = "pDC_d0")
+# view results
+pDC.de.markers
+pDC.de.markers.filtered <- pDC.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(pDC.de.markers.filtered[order(pDC.de.markers.filtered$avg_log2FC), ], 50) # 0 genes and 4 proteins found
+
+#AS-DC
+# single cell DE
+DefaultAssay(DC) <- "RNA"
+#DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_time"
+ASDC.de.markers <- FindMarkers(DC, ident.1 = "AS-DC_d1", ident.2 = "AS-DC_d0")
+# view results
+ASDC.de.markers
+ASDC.de.markers.filtered <- ASDC.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(ASDC.de.markers.filtered[order(ASDC.de.markers.filtered$avg_log2FC), ], 50) # 0 genes and 0 proteins found
+
+#cDC1
+# single cell DE
+DefaultAssay(DC) <- "RNA"
+#DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_time"
+cDC1.de.markers <- FindMarkers(DC, ident.1 = "cDC1_d1", ident.2 = "cDC1_d0") #Error in ValidateCellGroups(object = object, cells.1 = cells.1, cells.2 = cells.2,  : Cell group 1 has fewer than 3 cells
+# view results
+cDC1.de.markers
+cDC1.de.markers.filtered <- cDC1.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(cDC1.de.markers.filtered[order(cDC1.de.markers.filtered$avg_log2FC), ], 50) # 0 genes and 0 proteins found
+
+
+#Subset only DC2 and DC3================================================
+DC[["cluster_annotations"]] <- Idents(DC)
+DC_2_3 <- subset(DC, idents = c("DC2", "DC3"))
+
+#RNA data
+DefaultAssay(DC_2_3) <- "RNA"
+DC_2_3 <- NormalizeData(DC_2_3, normalization.method = "LogNormalize", scale.factor = 10000)
+DC_2_3 <- FindVariableFeatures(DC_2_3, selection.method = "vst", nfeatures = 2000)
+s.genes <-cc.genes$s.genes
+g2m.genes<-cc.genes$g2m.genes
+DC_2_3 <- CellCycleScoring(DC_2_3, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+DC_2_3 <- ScaleData(DC_2_3, vars.to.regress = c("S.Score", "G2M.Score"))
+DC_2_3 <- RunPCA(DC_2_3)
+DC_2_3 <- RunUMAP(DC_2_3, reduction = "pca", dims = 1:50, min.dist = 0.6)
+DimPlot(object = DC_2_3, group.by = "celltype_joint", reduction = "umap")
+DC_2_3 <- FindNeighbors(DC_2_3, reduction = "pca", dims = 1:50)
+DC_2_3 <- FindClusters(DC_2_3, reduction = "pca", resolution = 1)
+DimPlot(DC_2_3, reduction = "umap", group.by = "seurat_clusters")
+
+
+#CITE data
+DefaultAssay(DC_2_3) <- "CITE"
+DC_2_3 <- NormalizeData(DC_2_3, normalization.method = "CLR", margin = 2)
+DC_2_3 <- FindVariableFeatures(DC_2_3, selection.method = "vst", nfeatures = 2000)
+DC_2_3 <- ScaleData(DC_2_3)
+DC_2_3 <- RunPCA(DC_2_3, assay = "CITE", reduction.name = "pca.cite", reduction.key = "CITE_")
+DC_2_3 <- RunUMAP(DC_2_3, reduction = "pca.cite", dims = 1:18, reduction.name = "umap.cite", reduction.key = "CITE_")
+DC_2_3 <- FindNeighbors(DC_2_3, reduction = "pca.cite", dims = 1:50)
+DC_2_3 <- FindClusters(DC_2_3, reduction = "pca.cite", resolution = 0.6)
+DimPlot(DC_2_3, reduction = "umap.cite", group.by = "seurat_clusters")
+
+FeaturePlot(DC_2_3, features = c("CD14", "CD163"), reduction = "umap", keep.scale=NULL)
+
+FeaturePlot(DC_2_3, features = c("CD14-PROT", "CD163-PROT"),keep.scale=NULL, reduction = "umap")
+
+
+
+#DGE high responders vs low responders =====================================================
+
+# pseudobulk the counts based on timepoint-celltype
+pseudo_DC_2 <- AggregateExpression(DC, assays = "RNA", slot = "counts", return.seurat = TRUE, group.by = c("cluster_annotations", "timepoint", "adjmfc.group", "sampleid"))
+
+
+pseudo_DC_2$cluster_annotations.timepoint.severity <- paste(pseudo_DC_2$cluster_annotations, pseudo_DC_2$timepoint, pseudo_DC_2$adjmfc.group ,sep = "_")
+table(pseudo_DC_2$cluster_annotations.timepoint.severity)
+
+
+Idents(pseudo_DC_2) <- "cluster_annotations.timepoint.severity"
+
+#DC2
+
+bulk.DC2.de_2 <- FindMarkers(object = pseudo_DC_2, 
+                           ident.1 = "DC2_d1_ low", 
+                           ident.2 = "DC2_d1_high",
+                           test.use = "DESeq2")
+head(bulk.DC2.de_2, n = 15)
+bulk.DC2.de_2.filtered <- bulk.DC2.de_2 %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.DC2.de_2.filtered[order(bulk.DC2.de_2.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+#wilcox
+bulk.DC2.de_2.wilcox <- FindMarkers(
+  object = pseudo_DC_2, 
+  ident.1 = "DC2_d1_ low", 
+  ident.2 = "DC2_d1_high",
+  test.use = "wilcox"
+)
+
+bulk.DC2.de_2.wilcox.filtered <- bulk.DC2.de_2.wilcox %>%
+  filter(p_val_adj <= 0.05)
+top_genes_wilcox <- head(bulk.DC2.de_2.wilcox.filtered[order(bulk.DC2.de_2.wilcox.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+# single cell DE
+DefaultAssay(DC) <- "RNA"
+#DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_severity_time"
+DC2.de.markers <- FindMarkers(DC, ident.1 = "DC2_ low_d1", ident.2 = "DC2_high_d1")
+# view results
+DC2.de.markers
+DC2.de.markers.filtered <- DC2.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(DC2.de.markers.filtered[order(DC2.de.markers.filtered$avg_log2FC), ], 50) # 7 genes and 0 proteins found
+
+
+#DC3
+
+bulk.DC3.de_2 <- FindMarkers(object = pseudo_DC_2, 
+                             ident.1 = "DC3_d0_ low", 
+                             ident.2 = "DC3_d0_high",
+                             test.use = "DESeq2")
+head(bulk.DC3.de_2, n = 15)
+bulk.DC3.de_2.filtered <- bulk.DC3.de_2 %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.DC3.de_2.filtered[order(bulk.DC3.de_2.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+#wilcox
+bulk.DC3.de_2.wilcox <- FindMarkers(
+  object = pseudo_DC_2, 
+  ident.1 = "DC3_d0_ low", 
+  ident.2 = "DC3_d0_high",
+  test.use = "wilcox"
+)
+
+bulk.DC3.de_2.wilcox.filtered <- bulk.DC3.de_2.wilcox %>%
+  filter(p_val_adj <= 0.05)
+top_genes_wilcox <- head(bulk.DC3.de_2.wilcox.filtered[order(bulk.DC3.de_2.wilcox.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+# single cell DE
+DefaultAssay(DC) <- "RNA"
+#DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_severity_time"
+DC3.de.markers <- FindMarkers(DC, ident.1 = "DC3_ low_d0", ident.2 = "DC3_high_d0")
+# view results
+DC3.de.markers
+DC3.de.markers.filtered <- DC3.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(DC3.de.markers.filtered[order(DC3.de.markers.filtered$avg_log2FC), ], 50) # 7 genes and 0 proteins found
+
+
+#pDC
+
+bulk.pDC.de_2 <- FindMarkers(object = pseudo_DC_2, 
+                             ident.1 = "pDC_d1_ low", 
+                             ident.2 = "pDC_d1_high",
+                             test.use = "DESeq2")
+head(bulk.pDC.de_2, n = 15)
+bulk.pDC.de_2.filtered <- bulk.pDC.de_2 %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.pDC.de_2.filtered[order(bulk.pDC.de_2.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+#wilcox
+bulk.pDC.de_2.wilcox <- FindMarkers(
+  object = pseudo_DC_2, 
+  ident.1 = "pDC_d1_ low", 
+  ident.2 = "pDC_d1_high",
+  test.use = "wilcox"
+)
+
+bulk.pDC.de_2.wilcox.filtered <- bulk.pDC.de_2.wilcox %>%
+  filter(p_val_adj <= 0.05)
+top_genes_wilcox <- head(bulk.pDC.de_2.wilcox.filtered[order(bulk.pDC.de_2.wilcox.filtered$avg_log2FC), ], 50) # 0 genes found
+
+#check LGALS1
+FeaturePlot(HD, features = c("LGALS1"), reduction = "umap")
+VlnPlot(DC, features = c("LGALS1"), pt.size=0, group.by = "seurat_clusters")
+VlnPlot(DC, features = c("LGALS1"), pt.size=0, group.by = "sampleid")
+FeaturePlot(DC, features = c("LGALS1"), reduction = "umap", split.by = "adjmfc.group")
+
+
+# single cell DE
+DefaultAssay(DC) <- "RNA"
+#DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_severity_time"
+pDC.de.markers <- FindMarkers(DC, ident.1 = "pDC_ low_d1", ident.2 = "pDC_high_d1")
+# view results
+pDC.de.markers
+pDC.de.markers.filtered <- pDC.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(pDC.de.markers.filtered[order(pDC.de.markers.filtered$avg_log2FC), ], 50) # 7 genes and 0 proteins found
+
+#AS-DC
+bulk.ASDC.de_2 <- FindMarkers(object = pseudo_DC_2, 
+                             ident.1 = "AS-DC_d0_ low", 
+                             ident.2 = "AS-DC_d0_high",
+                             test.use = "DESeq2")
+head(bulk.ASDC.de_2, n = 15)
+bulk.ASDC.de_2.filtered <- bulk.ASDC.de_2 %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.ASDC.de_2.filtered[order(bulk.ASDC.de_2.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+
+# single cell DE
+#DefaultAssay(DC) <- "RNA"
+DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_severity_time"
+ASDC.de.markers <- FindMarkers(DC, ident.1 = "AS-DC_ low_d0", ident.2 = "AS-DC_high_d0")
+# view results
+ASDC.de.markers
+ASDC.de.markers.filtered <- ASDC.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(ASDC.de.markers.filtered[order(ASDC.de.markers.filtered$avg_log2FC), ], 50) # 0 genes and 0 proteins found
+
+#cDC1
+bulk.cDC1.de_2 <- FindMarkers(object = pseudo_DC_2, 
+                              ident.1 = "cDC1_d0_ low", 
+                              ident.2 = "cDC1_d0_high",
+                              test.use = "DESeq2")
+head(bulk.cDC1.de_2, n = 15)
+bulk.cDC1.de_2.filtered <- bulk.cDC1.de_2 %>%
+  filter(p_val_adj <= 0.05)
+top_genes <- head(bulk.cDC1.de_2.filtered[order(bulk.cDC1.de_2.filtered$avg_log2FC), ], 50) # 0 genes found
+
+
+
+# single cell DE
+DefaultAssay(DC) <- "RNA"
+#DefaultAssay(DC) <- "CITE"
+Idents(DC) <- "cluster_severity_time"
+cDC1.de.markers <- FindMarkers(DC, ident.1 = "cDC1_ low_d0", ident.2 = "cDC1_high_d0")
+# view results
+cDC1.de.markers
+cDC1.de.markers.filtered <- cDC1.de.markers %>%
+  filter(p_val_adj <= 0.05)
+top_genes_2 <- head(cDC1.de.markers.filtered[order(cDC1.de.markers.filtered$avg_log2FC), ], 50) # 0 genes and 0 proteins found
